@@ -10,6 +10,7 @@ const hydrationInFlight = new Map<OnlineProviderId, Promise<void>>();
 export const hydrateTvProviderAccount = async (providerId: OnlineProviderId): Promise<void> => {
     const existing = hydrationInFlight.get(providerId);
     if (existing) return existing;
+    if (useOnlineProviderAccountStore.getState().accounts[providerId]?.user) return;
 
     const task = (async () => {
         const snapshot = await loadProviderAccountSnapshot(providerId).catch(() => null);
