@@ -1,14 +1,12 @@
 import { useMemo } from 'react';
+import { useNowPlayingCardPositioningEntry } from './now-playing-toast/useNowPlayingCardPositioningEntry';
+import { useNowPlayingCardLayoutStore } from './now-playing-toast/nowPlayingCardLayoutStore';
 import { currentTime, lyricCurrentTime } from '../../../stores/motionSignals';
 import { useAppViewStore } from '../../../stores/useAppViewStore';
 import { useAppChromeStore } from '../../../stores/useAppChromeStore';
 import { useSearchNavigationStore } from '../../../stores/useSearchNavigationStore';
 import { useThemeSettingsStore } from '../../../stores/useThemeSettingsStore';
 import { useStageSettingsStore } from '../../../stores/useStageSettingsStore';
-import { usePlayerChromeSettingsStore } from '../../../stores/usePlayerChromeSettingsStore';
-import { useAndroidLayoutSettingsStore } from '../../../stores/useAndroidLayoutSettingsStore';
-import { useImmersiveChromeStore } from '../../../stores/useImmersiveChromeStore';
-import { useImmersiveChromeReveal } from '../../../hooks/useImmersiveChromeReveal';
 import { useTranslation } from 'react-i18next';
 import {
     selectDisplayCoverUrl,
@@ -19,7 +17,9 @@ import {
     usePlaybackStore,
 } from '../../../stores/usePlaybackStore';
 import { resolveLikeAvailability } from '../../../utils/playerLikeAvailability';
+import { canShuffleQueue } from '../../../utils/playbackNeighbors';
 import { buildAppOverlaysModel, type AppOverlaysDeps, type AppOverlaysModel } from './buildAppOverlaysModel';
+import { usePlayerChromeSettingsStore } from '../../../stores/usePlayerChromeSettingsStore';
 
 // src/components/app/overlays/useAppOverlaysModel.ts
 
@@ -35,11 +35,12 @@ const MEMORY_MONITOR_SHORTCUT_LABEL = 'Alt+Shift+M';
  */
 export const useAppOverlaysModel = (deps: AppOverlaysDeps): AppOverlaysModel => {
     const { t } = useTranslation();
+    useNowPlayingCardPositioningEntry(deps.navigateToPlayer);
+    const cardPositioning = useNowPlayingCardLayoutStore(state => state.isPositioning);
     const currentView = useAppViewStore(state => state.view);
     const isPlayerChromeHidden = useAppChromeStore(state => state.isPlayerChromeHidden);
-    const immersiveModeEnabled = useAndroidLayoutSettingsStore(state => state.immersiveModeEnabled);
-    const autoHidePlayerChrome = usePlayerChromeSettingsStore(state => state.autoHidePlayerChrome);
-    const immersiveChromeHidden = useImmersiveChromeStore(state => state.immersiveChromeHidden);
+    // 联动控制：控制条、命令面板按钮与右侧面板按钮共用原版「自动隐藏播放控制条」的这一刻状态。
+    const effectivePlayerChromeHidden = isPlayerChromeHidden;
     const isDevDebugOverlayVisible = useAppChromeStore(state => state.isDevDebugOverlayVisible);
     const isMemoryMonitorVisible = useAppChromeStore(state => state.isMemoryMonitorVisible);
     const isSearchOpen = useSearchNavigationStore(state => state.isSearchOpen);
@@ -62,7 +63,7 @@ export const useAppOverlaysModel = (deps: AppOverlaysDeps): AppOverlaysModel => 
     const displayPlayerState = usePlaybackStore(selectDisplayPlayerState);
     const playerControlSlotContext = useMemo(() => ({
         onShuffle: deps.shuffleQueue,
-        canShuffle: !isFmMode && playQueue.length > 1,
+        canShuffle: canShuffleQueue(playQueue.length, isFmMode, deps.isNowPlayingStageActive),
         onLike: deps.handleLike,
         isLiked: deps.isDisplaySongLiked,
         likeDisabled: resolveLikeAvailability(
@@ -79,26 +80,12 @@ export const useAppOverlaysModel = (deps: AppOverlaysDeps): AppOverlaysModel => 
         deps.invokeCommandById,
         deps.isDisplaySongLiked,
         deps.isNowPlayingControlDisabled,
+        deps.isNowPlayingStageActive,
         deps.shuffleQueue,
         displaySong,
         isFmMode,
         playQueue.length,
     ]);
-
-    // 全沉浸的触摸唤回节奏：进入播放界面收起，触摸屏幕后显示，静止 3 秒再收起。
-    // 原有自动隐藏开着时由它自行接管唤回，本钩子只负责“进入先收起”。
-    useImmersiveChromeReveal({
-        immersiveEnabled: immersiveModeEnabled,
-        isPlayerView: currentView === 'player',
-        autoHidePlayerChrome,
-    });
-
-    // 全沉浸模式只在播放视图生效：强制收起控制条、命令面板按钮与右侧齿轮/面板按钮。
-    // 歌单、歌曲浏览等界面保持原样，不会因为全沉浸而少掉浏览控件。
-    const immersivePlayerChromeHidden = immersiveModeEnabled
-        && currentView === 'player'
-        && immersiveChromeHidden;
-    const effectivePlayerChromeHidden = isPlayerChromeHidden || immersivePlayerChromeHidden;
 
     return useMemo(() => buildAppOverlaysModel({
         ...deps,
@@ -117,18 +104,18 @@ export const useAppOverlaysModel = (deps: AppOverlaysDeps): AppOverlaysModel => 
         lyrics: displayLyrics,
         activePlaybackContext,
         isPlayerChromeHidden: effectivePlayerChromeHidden,
-        immersivePlayerChromeHidden,
         playQueue,
         isFmMode,
         coverUrl: displayCoverUrl,
-        stageTrackPillMode,
+        stageTrackPillMode: cardPositioning ? 'always' : stageTrackPillMode,
+        stageTrackPillOnScreen: deps.stageTrackPillOnScreen || (cardPositioning && currentView === 'player'),
         stageTrackPillTimeoutSec,
         noTrackText: t('ui.noTrack'),
         prevTrackLabel: t('ui.previousTrack'),
         nextTrackLabel: t('ui.nextTrack'),
         stageTrackPillOpenPlayerLabel: t('ui.stageTrackPillOpenPlayer'),
         stageTrackPillOpenSongCardLabel: t('ui.stageTrackPillOpenSongCard'),
-        stageTrackPillFocusLatticeLabel: t('home.latticeFocusCurrent'),
+        stageTrackPillFocusLatticeLabel: t('playlist.locatePlaying'),
         playerControlSlotPrimary,
         playerControlSlotSecondary,
         playerControlSlotContext,
@@ -139,6 +126,7 @@ export const useAppOverlaysModel = (deps: AppOverlaysDeps): AppOverlaysModel => 
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }), [
         ...Object.values(deps),
+        cardPositioning,
         currentView,
         isSearchOpen,
         isDaylight,
@@ -150,10 +138,7 @@ export const useAppOverlaysModel = (deps: AppOverlaysDeps): AppOverlaysModel => 
         audioSrc,
         displayLyrics,
         activePlaybackContext,
-        autoHidePlayerChrome,
-        immersiveChromeHidden,
         effectivePlayerChromeHidden,
-        immersivePlayerChromeHidden,
         playQueue,
         isFmMode,
         displayCoverUrl,

@@ -5,6 +5,8 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ProviderAccountSummary } from '../../types/onlineMusic';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
+import { canRetryLogin } from '../../library/core/account/accountRules';
+import { LOGIN_CASE_TEXTS } from '../../components/login/window/loginCaseTexts';
 import type { TvAccountModel } from '../hooks/useTvAccount';
 
 const errorMessage = (error: unknown): string => (
@@ -23,18 +25,39 @@ export const TvLoginOverlay = ({
     const { t } = useTranslation();
     const compactProviderStrip = useMediaQuery('(max-width: 600px)');
     const [actionError, setActionError] = useState<string | null>(null);
-    const login = account.login;
+    const session = account.login;
     const pendingSwitch = account.pendingSwitch;
-    const session = login?.session ?? null;
-    const choosingMethod = session?.phase === 'choosing-method';
-    const backendFailure = login?.backendFailure ?? null;
-    const qrImageUrl = session?.qrImageUrl ?? '';
+    const choosingMethod = session?.phase === 'choosing-method' && session.methods.length > 0;
+    const localService = session?.localService ?? null;
+    const backendFailure = localService?.available && localService.failed
+        ? {
+            title: t('login.caseLocalService', { provider: account.providerLabel }),
+            detail: localService.error,
+            restartingLabel: t('home.restartingBackend'),
+            restartLabel: t('home.restartBackend'),
+        }
+        : null;
+    const qrImageUrl = session?.codeImage ?? '';
     const isLoadingQr = !session
         || session.phase === 'resolving-methods'
         || session.phase === 'loading'
-        || (!qrImageUrl && !choosingMethod && !backendFailure && !login?.canRetry);
-    const canRetry = Boolean(login?.canRetry) && !backendFailure && !choosingMethod;
-    const restarting = Boolean(session?.backend.restarting);
+        || (!qrImageUrl && !choosingMethod && !backendFailure && !session.failure);
+    const canRetry = Boolean(session) && !backendFailure && !choosingMethod
+        && canRetryLogin(session!, Date.now());
+    const restarting = Boolean(localService?.restarting);
+    const failureTitle = session?.failure
+        ? t(LOGIN_CASE_TEXTS[session.failure.case.id].title, { provider: account.providerLabel })
+        : null;
+    const loginStatus = failureTitle
+        || (session?.phase === 'scanned' ? t('home.qrScanned') : null)
+        || (session?.phase === 'confirmed' ? t('login.readingAccount') : null)
+        || (session?.phase === 'waiting'
+            ? (session.inBrowser ? t('home.loginCodeWaiting') : t('tv.login.waiting'))
+            : null)
+        || (session?.phase === 'ready' ? t('login.openBrowser') : null)
+        || backendFailure?.title
+        || t('tv.login.waiting');
+    const retryLabel = t(session?.inBrowser ? 'home.loginBrowserRetry' : 'home.retryQr');
 
     const selectProvider = async (provider: ProviderAccountSummary) => {
         if (!provider.availability.configured) return;
@@ -76,8 +99,11 @@ export const TvLoginOverlay = ({
         return t('tv.account.loginAction');
     };
 
-    const title = login?.title
-        || (pendingSwitch ? pendingSwitch.title : t('tv.account.title'));
+    const resolvedTitle = session?.texts?.title
+        ? t(session.texts.title)
+        : pendingSwitch
+            ? pendingSwitch.title
+            : t('tv.account.title');
 
     return (
         <section id="tv-layer-login" data-tv-layer="login" className="tv-overlay tv-login-overlay">
@@ -90,10 +116,10 @@ export const TvLoginOverlay = ({
                 <header className="tv-overlay-header">
                     <div>
                         <span className="tv-overlay-icon">
-                            {login ? <QrCode size={22} /> : <UserRound size={22} />}
+                            {session ? <QrCode size={22} /> : <UserRound size={22} />}
                         </span>
                         <span>
-                            <h2 id="tv-login-title">{title}</h2>
+                            <h2 id="tv-login-title">{resolvedTitle}</h2>
                         </span>
                     </div>
                 </header>
@@ -173,24 +199,24 @@ export const TvLoginOverlay = ({
                                     <small className="tv-account-error">{actionError || startError}</small>
                                 )}
                             </div>
-                        ) : choosingMethod && login?.methodStep ? (
+                        ) : choosingMethod ? (
                             <div className="tv-login-methods">
-                                <strong>{login.methodStep.title}</strong>
+                                <strong>{t('home.loginMethodTitle')}</strong>
                                 <div className="tv-login-method-grid">
-                                    {login.methodStep.options.map(option => (
+                                    {session.methods.map(method => (
                                         <button
-                                            key={option.id}
+                                            key={method.id}
                                             type="button"
                                             data-tv-focusable="true"
-                                            data-tv-focus-key={`login-method-${option.id}`}
-                                            onClick={() => void account.selectLoginMethod(option.id)}
+                                            data-tv-focus-key={`login-method-${method.id}`}
+                                            onClick={() => void account.selectLoginMethod(method.id)}
                                         >
-                                            {option.label}
+                                            {t(method.labelKey)}
                                         </button>
                                     ))}
                                 </div>
                             </div>
-                        ) : login ? (
+                        ) : session ? (
                             <div className="tv-login-body">
                                 <div className="tv-login-qr">
                                     {backendFailure ? (
@@ -210,11 +236,10 @@ export const TvLoginOverlay = ({
                                     <strong>
                                         {actionError
                                             || startError
-                                            || login.status
-                                            || (backendFailure ? backendFailure.title : t('tv.login.waiting'))}
+                                            || loginStatus}
                                     </strong>
-                                    {session?.backend.failed && (
-                                        <p>{session.backend.detail}</p>
+                                    {backendFailure?.detail && (
+                                        <p>{backendFailure.detail}</p>
                                     )}
                                     <div className="tv-login-actions">
                                         {backendFailure && (
@@ -223,7 +248,7 @@ export const TvLoginOverlay = ({
                                                 data-tv-focusable="true"
                                                 data-tv-focus-key="login-restart"
                                                 disabled={restarting}
-                                                onClick={() => void account.restartLoginBackend()}
+                                                onClick={() => void account.restartLoginService()}
                                             >
                                                 {restarting ? <Loader2 size={18} className="tv-spin" /> : <ServerCog size={18} />}
                                                 {restarting ? backendFailure.restartingLabel : backendFailure.restartLabel}
@@ -237,7 +262,7 @@ export const TvLoginOverlay = ({
                                                 onClick={() => void account.retryLogin()}
                                             >
                                                 <RefreshCw size={18} />
-                                                {login.retryLabel}
+                                                {retryLabel}
                                             </button>
                                         )}
                                     </div>

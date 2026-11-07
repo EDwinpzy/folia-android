@@ -24,11 +24,6 @@ type WallPointerPanOptions = {
     containerRef: RefObject<HTMLDivElement | null>;
     reducedMotion: boolean | null;
     overscan: number;
-    /**
-     * 宿主要不要钳制相机（比如有限拼贴的边界、性能优先时的行程上限）。拖动 / 滚轮 / 惯性都过这一道，
-     * 键盘与播放跟随的补间不走这里 —— 它们要能把任意一张卡带到眼前。
-     */
-    clampCamera?: (camera: LatticeCamera) => LatticeCamera;
     bounds: Bounds;
     cameraRef: MutableRefObject<LatticeCamera>;
     getWorldBounds: (camera: LatticeCamera, viewport: { width: number; height: number }) => Bounds;
@@ -36,14 +31,11 @@ type WallPointerPanOptions = {
 };
 
 export const useWallPointerPan = ({
-    applyCamera, animationRef, stopPan, containerRef, reducedMotion, overscan, clampCamera,
+    applyCamera, animationRef, stopPan, containerRef, reducedMotion, overscan,
     bounds, cameraRef, getWorldBounds, viewportRef,
 }: WallPointerPanOptions) => {
     const boundsRef = useRef(bounds);
     boundsRef.current = bounds;
-    // 钳制函数每次渲染可能是新身份，但它只在这里被读，用 ref 接住就不会把 updateCamera 的身份弄脏。
-    const clampCameraRef = useRef(clampCamera);
-    clampCameraRef.current = clampCamera;
     const pointerRef = useRef<{
         id: number;
         start: { x: number; y: number };
@@ -58,8 +50,7 @@ export const useWallPointerPan = ({
 
     // Republishing bounds is what triggers a re-cull, so only do it near the edge of what is culled.
     const updateCamera = useCallback((x: number, y: number) => {
-        const requested = { ...cameraRef.current, x, y };
-        const next = clampCameraRef.current ? clampCameraRef.current(requested) : requested;
+        const next = { ...cameraRef.current, x, y };
         const visible = getWorldBounds(next, viewportRef.current);
         const culled = boundsRef.current;
         const padding = overscan - CULL_EDGE_MARGIN_PX;

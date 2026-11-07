@@ -46,8 +46,10 @@ import java.lang.reflect.Method;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import okhttp3.Headers;
@@ -347,16 +349,31 @@ public class FoliaNativePlugin extends Plugin {
                     String headerName = headerNames.next();
                     Object headerValue = headers.opt(headerName);
                     if (headerValue != null) {
-                        builder.header(headerName, String.valueOf(headerValue));
+                        String value = String.valueOf(headerValue);
+                        // OkHttp rejects non-ASCII header values (the WebView cookie store can
+                        // hold a cookie with a CJK value). Cookie values must be ASCII; encode
+                        // the invalid bytes rather than failing the whole request.
+                        if ("cookie".equalsIgnoreCase(headerName)) {
+                            value = sanitizeCookieHeader(value);
+                            if (value.isEmpty()) continue;
+                        }
+                        builder.header(headerName, value);
                     }
                 }
             }
             // OkHttp has no cookie jar here, so carry the WebView cookie store
             // ourselves unless the caller injected an explicit Cookie header.
-            if (headers == null || headers.optString("cookie") == null) {
+            //
+            // sendCookies=false 是给桌面桥那套 credentials:'omit' 用的：汽水（抖音）的接口
+            // 按不带登录态的匿名请求取流，若这里偷偷补上 WebView 里残留的抖音 Cookie，
+            // 拿到的就可能是另一份（甚至 401 的）响应。显式的 Cookie 头仍然照发：
+            // 调用方自己要的凭据不能被这个开关吞掉。
+            boolean sendCookies = Boolean.TRUE.equals(call.getBoolean("sendCookies", true));
+            if (sendCookies && !hasHeader(headers, "cookie")) {
                 String storedCookies = CookieManager.getInstance().getCookie(url);
                 if (storedCookies != null && !storedCookies.isEmpty()) {
-                    builder.header("Cookie", storedCookies);
+                    String sanitized = sanitizeCookieHeader(storedCookies);
+                    if (!sanitized.isEmpty()) builder.header("Cookie", sanitized);
                 }
             }
 
@@ -432,6 +449,16 @@ public class FoliaNativePlugin extends Plugin {
         } catch (IOException | IllegalArgumentException error) {
             call.reject(error.getMessage(), error);
         }
+    }
+
+    /** JS 传过来的请求头有没有这一条；HTTP 头名不分大小写，JSON 键却是原样保留的。 */
+    private static boolean hasHeader(JSObject headers, String name) {
+        if (headers == null || name == null) return false;
+        Iterator<String> names = headers.keys();
+        while (names.hasNext()) {
+            if (name.equalsIgnoreCase(names.next())) return true;
+        }
+        return false;
     }
 
     private void storeResponseCookies(String requestUrl, Response response) {
@@ -539,13 +566,31 @@ public class FoliaNativePlugin extends Plugin {
         }
         try {
             if (localAudioServer == null) localAudioServer = new LocalAudioServer(getContext());
-            String localUrl = localAudioServer.registerRemoteAudio(url);
+            // 汽水（抖音）那批 CDN 的流地址有时只认特定的 Referer / UA / 自定义头，
+            // 而 <audio> 自己一条头都加不了，只能注册时把调用方要的头带进来。
+            // 不传 headers 时走和以前完全一样的那条路（本地服务补默认 UA / Referer）。
+            String localUrl = localAudioServer.registerRemoteAudio(url, headerMap(call.getObject("headers")), false);
             JSObject result = new JSObject();
             result.put("url", localUrl);
             call.resolve(result);
         } catch (Exception error) {
             call.reject(error.getMessage(), error);
         }
+    }
+
+    /** JSObject（字符串字典）→ 请求头 Map；空对象与不传等价，返回 null。 */
+    private static Map<String, String> headerMap(JSObject source) {
+        if (source == null) return null;
+        Map<String, String> headers = new LinkedHashMap<>();
+        Iterator<String> names = source.keys();
+        while (names.hasNext()) {
+            String name = names.next();
+            if (name == null || name.isEmpty()) continue;
+            String value = source.optString(name, null);
+            if (value == null) continue;
+            headers.put(name, value);
+        }
+        return headers.isEmpty() ? null : headers;
     }
 
     @PluginMethod
@@ -1196,6 +1241,53 @@ public class FoliaNativePlugin extends Plugin {
         return new File(directory, ref);
     }
 
+    /**
+     * 把 WebView Cookie 值里的非 ASCII 字节按 UTF-8 百分号编码。
+     *
+     * OkHttp 的 Headers.Builder 会拒绝非 ASCII 字符（报 "Unexpected char 0x.... in Cookie value"），
+     * 而 WebView 的 CookieManager 可能存着带中文的 cookie（酷狗登录时出现过 0x5fb5）。
+     * HTTP cookie 本来只能是 ASCII；这里只编码非 ASCII/控制字符，普通 token 原样保留。
+     * cookie 名不是合法 token 的整对丢弃，避免把请求头再次弄坏。
+     */
+    static String sanitizeCookieHeader(String raw) {
+        if (raw == null || raw.isEmpty()) return "";
+        StringBuilder out = new StringBuilder(raw.length());
+        for (String pair : raw.split(";")) {
+            int separator = pair.indexOf('=');
+            if (separator <= 0) continue;
+            String name = pair.substring(0, separator).trim();
+            String value = pair.substring(separator + 1).trim();
+            if (name.isEmpty() || !isCookieName(name)) continue;
+            if (out.length() > 0) out.append("; ");
+            out.append(name).append('=');
+            appendCookieValue(out, value);
+        }
+        return out.toString();
+    }
+
+    private static boolean isCookieName(String name) {
+        for (int i = 0; i < name.length(); i += 1) {
+            char c = name.charAt(i);
+            boolean token = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+                || "!#$%&'*+-.^_`|~".indexOf(c) >= 0;
+            if (!token) return false;
+        }
+        return true;
+    }
+
+    private static void appendCookieValue(StringBuilder out, String value) {
+        for (byte b : value.getBytes(java.nio.charset.StandardCharsets.UTF_8)) {
+            int v = b & 0xff;
+            if (v >= 0x20 && v <= 0x7e) {
+                out.append((char) v);
+            } else {
+                out.append('%');
+                out.append(Character.toUpperCase(Character.forDigit((v >> 4) & 0x0f, 16)));
+                out.append(Character.toUpperCase(Character.forDigit(v & 0x0f, 16)));
+            }
+        }
+    }
+
     /** 与 OkHttp 的 HttpMethod.requiresRequestBody 同一份判定：这几个方法必须有请求体。 */
     private static boolean requiresRequestBody(String method) {
         if (method == null) return false;
@@ -1226,5 +1318,116 @@ public class FoliaNativePlugin extends Plugin {
             cookies.add(cookie);
         }
         return cookies;
+    }
+    // ── Spotify 登录（OAuth PKCE + 回环回调，见 SpotifyAuth.java）────────────────
+
+    @PluginMethod
+    public void spotifyStartLogin(PluginCall call) {
+        new Thread(() -> {
+            try {
+                String id = SpotifyAuth.signIn(getContext());
+                JSObject result = new JSObject();
+                result.put("signedIn", id != null);
+                result.put("id", id);
+                result.put("reason", SpotifyAuth.lastError());
+                result.put("detail", SpotifyAuth.lastDetail() == null ? "" : SpotifyAuth.lastDetail());
+                if (id != null) result.put("user", toJsUser(SpotifyAuth.profile(getContext())));
+                call.resolve(result);
+            } catch (IOException error) {
+                call.reject("Spotify sign-in failed: " + error.getMessage(), error);
+            }
+        }, "folia-spotify-login").start();
+    }
+
+    @PluginMethod
+    public void spotifyCancelLogin(PluginCall call) {
+        SpotifyAuth.cancel();
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void spotifyLoginStatus(PluginCall call) {
+        JSObject result = new JSObject();
+        String id = SpotifyAuth.signedInId(getContext());
+        result.put("signedIn", id != null);
+        result.put("id", id);
+        if (id != null) result.put("user", toJsUser(SpotifyAuth.profile(getContext())));
+        call.resolve(result);
+    }
+
+    /** 当前可用的访问令牌（过期前自动刷新）；没有登录时为 null。 */
+    @PluginMethod
+    public void spotifyAccessToken(PluginCall call) {
+        new Thread(() -> {
+            try {
+                String token = SpotifyAuth.accessToken(getContext());
+                JSObject result = new JSObject();
+                result.put("token", token == null ? "" : token);
+                call.resolve(result);
+            } catch (IOException error) {
+                call.reject("Spotify token could not be read: " + error.getMessage(), error);
+            }
+        }, "folia-spotify-token").start();
+    }
+
+    @PluginMethod
+    public void spotifyLogout(PluginCall call) {
+        SpotifyAuth.signOut(getContext());
+        call.resolve();
+    }
+
+    /** Spotify 的 Web API 代取：令牌留在原生侧，渲染层只说「哪个接口」。 */
+    @PluginMethod
+    public void spotifyRequest(PluginCall call) {
+        String method = call.getString("method", "GET").toUpperCase(Locale.ROOT);
+        String path = call.getString("path", "");
+        String bodyText = call.getString("bodyText", "");
+        if (path == null || (!path.startsWith("/") && !path.startsWith("https://api.spotify.com/"))) {
+            call.reject("Spotify request path must be a Spotify API path");
+            return;
+        }
+        new Thread(() -> {
+            try {
+                String token = SpotifyAuth.accessToken(getContext());
+                if (token == null) {
+                    call.reject("Spotify is not signed in");
+                    return;
+                }
+                String url = path.startsWith("https://") ? path : "https://api.spotify.com" + path;
+                RequestBody body = null;
+                if (!bodyText.isEmpty()) {
+                    body = RequestBody.create(bodyText, MediaType.parse("application/json; charset=utf-8"));
+                }
+                Request.Builder builder = new Request.Builder()
+                        .url(url)
+                        .header("Authorization", "Bearer " + token);
+                if (body != null) builder.method(method, body);
+                else if ("GET".equals(method)) builder.get();
+                else builder.method(method, RequestBody.create(new byte[0], null));
+                try (Response response = client.newCall(builder.build()).execute()) {
+                    JSObject result = new JSObject();
+                    result.put("status", response.code());
+                    String responseBody = response.body() == null ? "" : response.body().string();
+                    result.put("body", responseBody);
+                    call.resolve(result);
+                }
+            } catch (IOException error) {
+                call.reject("Spotify request failed: " + error.getMessage(), error);
+            }
+        }, "folia-spotify-api").start();
+    }
+
+    private JSObject toJsUser(JSONObject profile) {
+        JSObject user = new JSObject();
+        if (profile == null) return user;
+        user.put("id", profile.optString("id", ""));
+        user.put("displayName", profile.optString("display_name", ""));
+        user.put("product", profile.optString("product", ""));
+        user.put("country", profile.optString("country", ""));
+        org.json.JSONArray images = profile.optJSONArray("images");
+        if (images != null && images.length() > 0) {
+            user.put("avatarUrl", images.optJSONObject(0) == null ? "" : images.optJSONObject(0).optString("url", ""));
+        }
+        return user;
     }
 }

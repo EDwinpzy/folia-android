@@ -12,9 +12,9 @@ import type {
     LibraryHomeCard,
     LibraryHomeFeedOwner,
     LibraryHomeFeedStatus,
-} from '../../library/core/contracts/homeModel';
-import { buildOnlineAlbumCards, buildOnlineRadioCards } from '../../library/core/model/homeCards';
-import { readOnlineProviderCapabilities } from '../../library/core/services/onlineHomeProvider';
+} from '../../library/core/home/homeModel.contract';
+import { buildOnlineAlbumCards, buildOnlineRadioCards } from '../../library/core/home/homeCards';
+import { readOnlineProviderCapabilities } from '../../library/core/home/online/onlineHomeProvider.service';
 import { omni } from '../../services/onlineMusic/omni';
 import type { SongResult } from '../../types';
 import type { MediaId } from '../../types/onlineMusic';

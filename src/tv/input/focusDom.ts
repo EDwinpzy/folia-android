@@ -11,7 +11,8 @@ export type TvLayerId =
     | 'collection'
     | 'search'
     | 'login'
-    | 'exit';
+    | 'exit'
+    | 'failure';
 
 const FOCUSABLE_SELECTOR = '[data-tv-focusable="true"]:not(:disabled):not([aria-disabled="true"])';
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeQqSong } from '../../src/services/onlineMusic/qqNormalize';
+import { normalizeQqSong } from '../../src/services/onlineMusic/qq/qqNormalize';
 import { mergeQQSearchEnrich } from '../../src/nativeBridge/api/qq.js';
 
 // The bridge's liked-songs path returns enriched rows shaped like this. If the
@@ -24,7 +24,7 @@ describe('normalizeQqSong for liked songs', () => {
         });
 
         expect(song.name).toBe('晴天');
-        expect(song.artists?.map(artist => artist.name)).toEqual(['周杰伦']);
+        expect(song.artists?.map((artist: { name?: string }) => artist.name)).toEqual(['周杰伦']);
         expect(song.album?.name).toBe('叶惠美');
         expect(song.sourceRef).toMatchObject({ kind: 'online', providerId: 'qq' });
     });
@@ -57,6 +57,6 @@ describe('mergeQQSearchEnrich', () => {
         const song = normalizeQqSong(row);
         expect(song.name).toBe('晴天');
         expect(song.album?.name).toBe('叶惠美');
-        expect(song.artists?.map(artist => artist.name)).toEqual(['周杰伦']);
+        expect(song.artists?.map((artist: { name?: string }) => artist.name)).toEqual(['周杰伦']);
     });
 });

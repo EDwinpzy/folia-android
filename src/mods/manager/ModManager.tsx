@@ -5,9 +5,13 @@ import { useTranslation } from 'react-i18next';
 import type { Theme } from '@/types';
 import { DEFAULT_THEME } from '@/services/baseThemes';
 import { useModsStore } from '../useModsStore';
-import { FOLIUM_VERSION } from '../folium/contract';
+import { FOLIUM_HOST_VERSION } from '../folium/shared';
 import { useDesktopSettingsStore } from '../../stores/useDesktopSettingsStore';
+import { importAndroidModZip } from '../android/androidModsBridge';
+import { IS_ANDROID_WEBVIEW } from '../../utils/platform';
+import { openOutsideLink, opensThroughDesktopApp } from '../../utils/system/outsideLink';
 import { ModListItem, translateModError } from './ModListItem';
+import { useModCosts } from './modCost';
 import type { ModManagerClasses } from './modManagerClasses';
 
 // src/mods/manager/ModManager.tsx
@@ -28,9 +32,9 @@ export const MOD_MARKET_URL = 'https://folium-compound.cielaniska.top/';
 
 /** On desktop a plain link would open inside the app window; hand it to the system browser instead. */
 const openLinkExternally = (event: React.MouseEvent<HTMLAnchorElement>) => {
-    if (!window.electron?.openExternalUrl) return;
+    if (!opensThroughDesktopApp()) return;
     event.preventDefault();
-    void window.electron.openExternalUrl(event.currentTarget.href);
+    void openOutsideLink(event.currentTarget.href);
 };
 
 export const ModManager: React.FC<ModManagerProps> = ({ classes, isDaylight, theme }) => {
@@ -47,7 +51,10 @@ export const ModManager: React.FC<ModManagerProps> = ({ classes, isDaylight, the
     const toggleMod = useModsStore((state) => state.toggleMod);
     const bindEvents = useModsStore((state) => state.bindEvents);
     const logs = useModsStore((state) => state.logs);
+    const startSkipped = useModsStore((state) => state.startSkipped);
     const modSystemEnabled = useDesktopSettingsStore((state) => state.modSystemEnabled);
+    // Read on a slow timer for as long as this list is on screen, and not at all otherwise.
+    const costs = useModCosts(mods.map((mod) => mod.id));
 
     const [selectionMode, setSelectionMode] = useState(false);
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -60,6 +67,24 @@ export const ModManager: React.FC<ModManagerProps> = ({ classes, isDaylight, the
     // whole panel; combined with pointer-events-none on the overlay it stays steady.
     const dragDepthRef = useRef(0);
     const canInstall = bridgeAvailable && modSystemEnabled;
+
+    const importAndroidZip = async () => {
+        if (!canInstall || installing) return;
+        setInstalling(true);
+        setNotice(null);
+        try {
+            const result = await importAndroidModZip();
+            if (result.canceled) return;
+            if (!result.imported) {
+                setNotice({ kind: 'error', text: result.error || t('mods.androidIncompatible') });
+                return;
+            }
+            await refresh();
+            setNotice({ kind: 'ok', text: t('mods.installSuccess', { id: result.imported }) });
+        } finally {
+            setInstalling(false);
+        }
+    };
 
     // The main process loads or unloads every mod when the master switch flips, so the list is
     // re-read then as well as on mount.
@@ -209,12 +234,12 @@ export const ModManager: React.FC<ModManagerProps> = ({ classes, isDaylight, the
     return (
         <div
             className="relative flex flex-col gap-3"
-            onDragEnter={handleDragEnter}
-            onDragOver={(event) => event.preventDefault()}
-            onDragLeave={handleDragLeave}
-            onDrop={handleDropZip}
+            onDragEnter={IS_ANDROID_WEBVIEW ? undefined : handleDragEnter}
+            onDragOver={IS_ANDROID_WEBVIEW ? undefined : (event) => event.preventDefault()}
+            onDragLeave={IS_ANDROID_WEBVIEW ? undefined : handleDragLeave}
+            onDrop={IS_ANDROID_WEBVIEW ? undefined : handleDropZip}
         >
-            {isDragging ? (
+            {!IS_ANDROID_WEBVIEW && isDragging ? (
                 <motion.div
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
@@ -236,15 +261,29 @@ export const ModManager: React.FC<ModManagerProps> = ({ classes, isDaylight, the
                 </span>
                 <div className="flex flex-wrap items-center gap-1.5">
                     {marketLink}
-                    <button
-                        type="button"
-                        onClick={() => { void handleOpenDirectory(); }}
-                        className={`${toolbarButtonClass} ${classes.ghostButton}`}
-                        style={{ color: 'var(--text-primary)' }}
-                    >
-                        <FolderOpen size={12} />
-                        {t('mods.openDirectory')}
-                    </button>
+                    {IS_ANDROID_WEBVIEW && (
+                        <button
+                            type="button"
+                            onClick={() => { void importAndroidZip(); }}
+                            disabled={installing}
+                            className={`${toolbarButtonClass} ${classes.ghostButton}`}
+                            style={{ color: 'var(--text-primary)' }}
+                        >
+                            <Upload size={12} />
+                            {installing ? t('mods.installing') : t('mods.androidImport')}
+                        </button>
+                    )}
+                    {!IS_ANDROID_WEBVIEW && (
+                        <button
+                            type="button"
+                            onClick={() => { void handleOpenDirectory(); }}
+                            className={`${toolbarButtonClass} ${classes.ghostButton}`}
+                            style={{ color: 'var(--text-primary)' }}
+                        >
+                            <FolderOpen size={12} />
+                            {t('mods.openDirectory')}
+                        </button>
+                    )}
                     <button
                         type="button"
                         onClick={() => (selectionMode ? exitSelectionMode() : setSelectionMode(true))}
@@ -270,9 +309,16 @@ export const ModManager: React.FC<ModManagerProps> = ({ classes, isDaylight, the
             <div className={`flex items-start gap-2 rounded-xl border px-3 py-2.5 text-left ${classes.warning}`}>
                 <TriangleAlert size={14} className="mt-px shrink-0" />
                 <span className="text-[11px] leading-relaxed">
-                    {t('mods.warning', { version: `${FOLIUM_VERSION.major}.${FOLIUM_VERSION.minor}` })}
+                    {t('mods.warning', { version: `${FOLIUM_HOST_VERSION.major}.${FOLIUM_HOST_VERSION.minor}` })}
                 </span>
             </div>
+
+            {startSkipped ? (
+                <div className={`flex items-start gap-2 rounded-xl border px-3 py-2.5 text-left ${classes.warning}`}>
+                    <Power size={14} className="mt-px shrink-0" />
+                    <span className="text-[11px] leading-relaxed">{t('mods.startSkippedBanner')}</span>
+                </div>
+            ) : null}
 
             {notice ? (
                 <div className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-xs text-left ${notice.kind === 'ok' ? classes.success : classes.danger}`}>
@@ -341,6 +387,7 @@ export const ModManager: React.FC<ModManagerProps> = ({ classes, isDaylight, the
                     <ModListItem
                         key={mod.id}
                         mod={mod}
+                        cost={costs[mod.id]}
                         expanded={selectedModId === mod.id && !selectionMode}
                         selected={selectedIds.has(mod.id)}
                         selectionMode={selectionMode}

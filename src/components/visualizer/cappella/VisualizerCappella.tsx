@@ -16,7 +16,6 @@ import { buildCappellaMessages } from './cappellaMessages';
 import { getVisibleLineIndexAtTime, getVisibleMessages } from './cappellaMessageLayout';
 import { getOrBuildBubbleMetrics } from './cappellaBubbleMetrics';
 import { CappellaMessageRow } from './CappellaMessageRow';
-import { useFontsEpoch } from '../../../hooks/useFontsEpoch';
 
 // src/components/visualizer/cappella/VisualizerCappella.tsx
 // Renders parsercore-timed lyrics as a chat-style cappella conversation.
@@ -42,8 +41,7 @@ const VisualizerCappella: React.FC<VisualizerCappellaProps> = (props) => {
         subtitleUpcomingLyricsBlur,
         isPlayerChromeHidden = false,
         hideTranslationSubtitle = false,
-        showSubtitleTranslation = true,
-        subtitleContentMode,
+        subtitleOverlayLayout,
         cappellaTuning = DEFAULT_CAPPELLA_TUNING,
         cappellaCustomEmojiImages = [],
         cappellaCustomAvatarImages = [],
@@ -59,15 +57,8 @@ const VisualizerCappella: React.FC<VisualizerCappellaProps> = (props) => {
             height: typeof window === 'undefined' ? 900 : window.innerHeight,
         };
     const bubbleMetricsCacheRef = useRef(new Map<string, PreparedBubbleMetrics>());
-    const fontsEpoch = useFontsEpoch();
     const [visibleLineIndex, setVisibleLineIndex] = useState(() => getVisibleLineIndexAtTime(lines, currentTime.get()));
     const visibleLineIndexRef = useRef(visibleLineIndex);
-    // 主题字体是 Web 字体：字体换进来之前量出来的气泡宽度偏小，气泡被 CSS maxWidth 卡住会把
-    // 最后一个字挤到第二排。字体就绪（或换主题）后丢掉旧度量，下面各处的 memo 依赖 fontsEpoch
-    // 会按新字体重算。
-    useEffect(() => {
-        bubbleMetricsCacheRef.current.clear();
-    }, [fontsEpoch]);
     const titleText = songTitle?.trim() || t('ui.noTrack');
     const avatarSeed = seed ?? titleText;
     const intensityConfig = useMemo(() => getCappellaIntensityConfig(theme.animationIntensity), [theme.animationIntensity]);
@@ -192,7 +183,6 @@ const VisualizerCappella: React.FC<VisualizerCappellaProps> = (props) => {
                                     metricsCache={bubbleMetricsCacheRef}
                                     intensityConfig={intensityConfig}
                                     customAvatarImages={customAvatarImages}
-                                    fontsEpoch={fontsEpoch}
                                 />
                             ))}
                         </AnimatePresence>
@@ -232,8 +222,7 @@ const VisualizerCappella: React.FC<VisualizerCappellaProps> = (props) => {
                 subtitleFontScale={subtitleFontScale}
                 isPlayerChromeHidden={isPlayerChromeHidden}
                 hideTranslationSubtitle={hideTranslationSubtitle}
-                showSubtitleTranslation={showSubtitleTranslation}
-                subtitleContentMode={subtitleContentMode}
+                subtitleOverlayLayout={subtitleOverlayLayout}
             />
         </VisualizerShell>
     );

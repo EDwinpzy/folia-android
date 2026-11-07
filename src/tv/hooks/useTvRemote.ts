@@ -88,9 +88,14 @@ export const useTvRemote = ({ onAction, onHandledKey }: TvRemoteOptions): void =
 
         const handleKeyUp = (event: KeyboardEvent) => {
             const action = resolveTvRemoteAction(event);
-            if (action) pressTrackerRef.current.release(action);
+            if (!action) return;
+            pressTrackerRef.current.release(action);
+            if (lastDirectionRef.current?.action === action) lastDirectionRef.current = null;
         };
-        const clearPressedActions = () => pressTrackerRef.current.clear();
+        const clearPressedActions = () => {
+            pressTrackerRef.current.clear();
+            lastDirectionRef.current = null;
+        };
 
         window.addEventListener('keydown', handleKeyDown, true);
         window.addEventListener('keyup', handleKeyUp, true);

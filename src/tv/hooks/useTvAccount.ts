@@ -6,7 +6,7 @@ import {
     useLibraryAccountPendingSwitch,
     useLibraryAccountProviders,
     useLibraryAccountSelector,
-} from '../../library/core/bindings/useLibraryAccount';
+} from '../../library/core/account/useLibraryAccount';
 import { useLibraryAccountController } from '../../library/app/useLibraryAccountController';
 import { useOnlineProviderAccountStore } from '../../stores/useOnlineProviderAccountStore';
 import type { OnlineProviderId } from '../../types/onlineMusic';
@@ -20,20 +20,12 @@ export type TvAccountModel = ReturnType<typeof useTvAccount>;
 
 export const useTvAccount = ({ onProviderSwitch }: { onProviderSwitch?: () => void } = {}) => {
     const controller = useLibraryAccountController({
-        refreshers: {
-            netease: () => refreshTvProviderAccount('netease'),
-            kugou: () => refreshTvProviderAccount('kugou'),
-            qq: () => refreshTvProviderAccount('qq'),
-            bodian: () => refreshTvProviderAccount('bodian'),
-        },
-        logouts: {
-            netease: () => logoutTvProviderAccount('netease'),
-            kugou: () => logoutTvProviderAccount('kugou'),
-            qq: () => logoutTvProviderAccount('qq'),
-            bodian: () => logoutTvProviderAccount('bodian'),
-        },
+        logout: logoutTvProviderAccount,
+        confirmLogout: async () => true,
         switchCleanup: {
-            resetForProviderSwitch: () => onProviderSwitch?.(),
+            leaveProvider: () => onProviderSwitch?.(),
+            holdsSongsOf: () => false,
+            dropSongsOf: () => undefined,
         },
     });
     const { providers, activeProviderId } = useLibraryAccountProviders(controller);
@@ -65,9 +57,12 @@ export const useTvAccount = ({ onProviderSwitch }: { onProviderSwitch?: () => vo
         await controller.retryLogin();
     }, [controller]);
 
-    const selectProvider = useCallback(async (providerId: OnlineProviderId) => (
-        controller.selectProvider(providerId)
-    ), [controller]);
+    const selectProvider = useCallback(async (providerId: OnlineProviderId) => {
+        const result = await controller.selectProvider(providerId);
+        return result.action === 'login'
+            ? controller.startLogin(providerId)
+            : result;
+    }, [controller]);
 
     const confirmSwitch = useCallback(async (requestId: number) => (
         controller.confirmSwitch(requestId)
@@ -85,8 +80,8 @@ export const useTvAccount = ({ onProviderSwitch }: { onProviderSwitch?: () => vo
         controller.closeLogin();
     }, [controller]);
 
-    const restartLoginBackend = useCallback(async () => {
-        await controller.restartLoginBackend();
+    const restartLoginService = useCallback(async () => {
+        await controller.restartLocalService();
     }, [controller]);
 
     const logout = useCallback(async () => {
@@ -111,7 +106,7 @@ export const useTvAccount = ({ onProviderSwitch }: { onProviderSwitch?: () => vo
         cancelSwitch,
         selectLoginMethod,
         closeLogin,
-        restartLoginBackend,
+        restartLoginService,
         logout,
     };
 };

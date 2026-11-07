@@ -4,22 +4,23 @@ import { useAudioSettingsStore } from '../stores/useAudioSettingsStore';
 import { usePlaybackStore } from '../stores/usePlaybackStore';
 import { readCrashDiagnostics, readDiagnosticsHeartbeats } from './crashDiagnostics';
 import { readPlaybackContinuitySnapshot } from './mediaDiagnostics';
-import { readFrameTimingSnapshot, runCpuProbe } from './frameTimingDiagnostics';
+import { readCpuProbeForDiagnostics, readFrameTimingSnapshot } from './frameTimingDiagnostics';
 import { readLastAiThemeAttempt, readAiThemeAttempts, readFailedAiThemeAttempts } from './aiThemeDiagnostics';
-import { isAiConfigured, readAiSettings } from '../services/aiSettings';
 import { isNeutralAudioEffects } from './audioEffects';
 import { getCollectionOrderDiagnosticLines } from './collectionOrderDiagnostics';
 import { getOnlineMutationDiagnosticLines } from './onlineMutationDiagnostics';
 import { getOnlinePlaybackDiagnosticLines } from './onlinePlaybackDiagnostics';
+import { readAppleMusicDiagnosticLines } from '../services/onlineMusic/appleMusic/appleMusicDiagnostics';
 import { getLyricsDiagnosticLines } from './lyricsDiagnostics';
 import { getLocalLibraryDiagnosticLines } from './localLibraryDiagnostics';
 import {
-    loadVideoLayerFileBlob,
-    readVideoLayerStoreFailure,
-    usesFileHandlePersistence,
+    canPersistVideoLayerFile,
+    loadVideoLayerFileHandle,
 } from '../services/videoLayerFile';
 import { useVideoLayerSettingsStore } from '../stores/useVideoLayerSettingsStore';
 import { collectWebGL2Diagnostics, formatWebGL2DiagnosticsLine } from './webglDiagnostics';
+import { getModResolutionGuardStats } from '../mods/runtime/modResolutionGuard';
+import { getNativeStageStatsSnapshot } from '../services/nativeStageDiagnostics';
 import { BUILTIN_VISUALIZER_BACKGROUND_MODES } from '../types/visualizerModes';
 import {
     VISUALIZER_BACKGROUND_REGISTRY,
@@ -225,7 +226,7 @@ const readFrameTimingLines = (): string[] => {
     const stats = frames.stats;
     const playback = usePlaybackStore.getState();
     // 探针自己会阻塞主线程，放在读取快照之后：跳过窗口已经在采样侧设好，不会污染上面的数字。
-    const cpu = runCpuProbe();
+    const cpu = readCpuProbeForDiagnostics();
     const percent = (value: number | null) => (value === null ? 'n/a' : `${value.toFixed(1)}ms`);
     const fps = (value: number | null) => (value === null ? 'n/a' : value.toFixed(1));
     const ratio = (count: number) => (
@@ -448,15 +449,32 @@ const readBottomBarGeometry = (): string[] => {
         const containingBlock = findAncestor(layer, element => getComputedStyle(element).position !== 'static');
         const blockRect = containingBlock?.getBoundingClientRect() ?? null;
 
+        // 手机适配的联动按钮现场：右下角齿轮与左下角命令面板按钮应当同高。
+        const describeChromeButton = (selector: string, label: string): string => {
+            const element = document.querySelector(selector) as HTMLElement | null;
+            if (!element) return `  ${label}: not mounted`;
+            const buttonRect = element.getBoundingClientRect();
+            return `  ${label}: top=${Math.round(buttonRect.top)} bottom=${Math.round(buttonRect.bottom)}`
+                + ` width=${Math.round(buttonRect.width)} height=${Math.round(buttonRect.height)}`
+                + ` cssBottom=${getComputedStyle(element).bottom}`;
+        };
+
         return [
             `  viewport: ${window.innerWidth}x${window.innerHeight}`,
             `  bar rect: top=${Math.round(rect.top)} bottom=${Math.round(rect.bottom)}`
+                + ` width=${Math.round(rect.width)} left=${Math.round(rect.left)} right=${Math.round(rect.right)}`
                 + ` height=${Math.round(rect.height)} gapToViewportBottom=${Math.round(window.innerHeight - rect.bottom)}`,
+            `  bar phone fit: html=${document.documentElement.getAttribute('data-folia-phone-fit') ?? '(none)'}`
+                + ` orientation=${document.documentElement.getAttribute('data-folia-phone-orientation') ?? '(none)'}`
+                + ` expanded=${bar.getAttribute('data-folia-player-bar-expanded') ?? '(none)'}`
+                + ` computedWidth=${getComputedStyle(bar).width}`,
             `  layer: position=${layerStyle?.position ?? 'n/a'} bottom=${layerStyle?.bottom ?? 'n/a'}`,
             `  containing block: ${containingBlock?.tagName ?? 'none'}`
                 + ` height=${blockRect ? Math.round(blockRect.height) : 'n/a'}`
                 + ` top=${blockRect ? Math.round(blockRect.top) : 'n/a'}`
                 + ` position=${containingBlock ? getComputedStyle(containingBlock).position : 'n/a'}`,
+            describeChromeButton('[data-testid="panel-toggle"]', 'panel toggle'),
+            describeChromeButton('[data-folia-command-palette-button="true"]', 'command button'),
         ];
     } catch (error) {
         return [`  geometry unavailable: ${error instanceof Error ? error.message : String(error)}`];
@@ -470,26 +488,13 @@ const readBottomBarGeometry = (): string[] => {
  * 失败时还能看到失败前一次是否成功、耗时是否异常。只导出错误原文，不导出提示词或 Key。
  */
 const readAiThemeGenerationLines = (): string[] => {
-    const settings = readAiSettings();
     const attempts = readAiThemeAttempts();
     const last = readLastAiThemeAttempt();
     // 未走到请求就被跳过的那几条（封面取色源 / 没有歌词 / 正在生成中）单独列，
     // 免得和真正的模型失败混在一起 —— 「按了按钮什么都没发生」以前在报告里是空白。
     const skips = attempts.filter(entry => entry.stage === 'skipped');
     const failed = readFailedAiThemeAttempts().filter(entry => entry.stage !== 'skipped');
-    const hostOf = (rawUrl: string): string => {
-        if (!rawUrl) return '(default)';
-        try {
-            return new URL(rawUrl).hostname || '(default)';
-        } catch {
-            return '(invalid url)';
-        }
-    };
     const lines: string[] = [
-        `  provider: ${settings.provider}`
-            + ` configured=${isAiConfigured(settings) ? 'yes' : 'no'}`
-            + ` model=${settings.provider === 'openai' ? (settings.openaiApiModel.trim() || '(default)') : 'gemini-3-flash-preview'}`,
-        `  endpoint host: ${settings.provider === 'openai' ? hostOf(settings.openaiApiUrl.trim()) : 'generativelanguage.googleapis.com'}`,
         `  attempts: total=${attempts.length} failed=${failed.length} skipped=${skips.length}`,
         `  last: ${last ? formatAiThemeAttempt(last) : '(no AI theme generation recorded)'}`,
     ];
@@ -537,6 +542,23 @@ const formatByteSize = (value: number): string => {
     if (value >= 1024) return `${(value / 1024).toFixed(1)}KB`;
     return `${Math.round(value)}B`;
 };
+/**
+ * 等待一项采集，但最多等 ms 毫秒。设备存储或原生桥偶尔很慢（源存储上
+ * navigator.storage.persisted() 会阻塞两百多毫秒），诊断导出不该因此把界面卡住或卡死。
+ */
+const withDeadline = async <T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+        return await Promise.race([
+            promise,
+            new Promise<T>(resolve => {
+                timer = setTimeout(() => resolve(fallback), ms);
+            }),
+        ]);
+    } finally {
+        if (timer !== undefined) clearTimeout(timer);
+    }
+};
 
 /**
  * 视频层的本地视频在安卓上靠 IndexedDB 里的整份 Blob 持久化（桌面端存的是文件句柄）。
@@ -551,28 +573,21 @@ const readVideoLayerLines = async (): Promise<string[]> => {
         `  runtime: status=${state.localFileStatus}`
             + ` name=${state.localFileStatus === 'none' ? '(none)' : (state.localFileName ?? '(unnamed)')}`,
         // 存的是句柄还是整份：安卓上曾经误走句柄那条路，报告里一眼能看出用的是哪种。
-        `  pick path: ${usesFileHandlePersistence() ? 'file-handle' : 'indexeddb-blob'}`,
+        `  pick path: ${canPersistVideoLayerFile() ? 'file-handle' : 'indexeddb-blob'}`,
     ];
 
     try {
-        const blob = await loadVideoLayerFileBlob();
-        lines.push(
-            `  stored: blob=${blob ? 'yes' : 'no'}`
-            + (blob ? ` blob-size=${formatByteSize(blob.size ?? 0)} blob-name=${blob.name || '(unnamed)'}` : ''),
-        );
+        const handle = await withDeadline(loadVideoLayerFileHandle(), 600, null);
+        lines.push(`  stored: handle=${handle ? 'yes' : 'no'}`);
     } catch (error) {
         lines.push(`  stored: read-error ${error instanceof Error ? error.message : 'unknown'}`);
     }
 
-    // 写入失败时报告里只有一句 blob=no，看不出为什么 —— 上一次的异常在这里。
-    const storeFailure = readVideoLayerStoreFailure();
-    if (storeFailure) lines.push(`  last store failure: ${storeFailure}`);
-
     try {
         const storage = (navigator as Navigator & { storage?: StorageManager }).storage;
-        const estimate = await storage?.estimate?.();
+        const estimate = await withDeadline(Promise.resolve(storage?.estimate?.()), 600, undefined);
         if (estimate) {
-            const persisted = typeof storage?.persisted === 'function' ? await storage.persisted() : false;
+            const persisted = typeof storage?.persisted === 'function' ? await withDeadline(storage.persisted(), 400, false) : false;
             lines.push(
                 `  origin storage: persisted=${persisted ? 'yes' : 'no'}`
                 + ` usage=${formatByteSize(estimate.usage ?? 0)} quota=${formatByteSize(estimate.quota ?? 0)}`,
@@ -589,7 +604,8 @@ const readVideoLayerLines = async (): Promise<string[]> => {
 
 export const buildDiagnosticReport = async (): Promise<string> => {
     const appVersion = typeof __APP_VERSION__ === 'undefined' ? 'unknown' : __APP_VERSION__;
-    const heartbeats = await readDiagnosticsHeartbeats();
+    const emptyHeartbeat = { last: null, previous: null };
+    const heartbeats = await withDeadline(readDiagnosticsHeartbeats(), 800, { playback: emptyHeartbeat, service: emptyHeartbeat });
     const capacitor = (window as unknown as { Capacitor?: { getPlatform?: () => string; isNativePlatform?: () => boolean } }).Capacitor;
     const lines: string[] = [
         '### Folia diagnostics',
@@ -603,7 +619,7 @@ export const buildDiagnosticReport = async (): Promise<string> => {
         '',
         // 挖孔/刘海适配的现场：cutout mode、是否有挖孔、安全区矩形。
         'display cutout:',
-        ...(await readDisplayCutoutLines()),
+        ...(await withDeadline(readDisplayCutoutLines(), 800, ['  (timed out)'])),
         '',
         'session storage:',
         `  qq session: ${readLocalStorageFlag('online_provider:qq:cookie')}`,
@@ -636,6 +652,8 @@ export const buildDiagnosticReport = async (): Promise<string> => {
         // 漫游背景 / 部分可视化依赖 WebGL2：把真实能力写进报告，避免只能让用户在浏览器另测。
         'graphics capability:',
         formatWebGL2DiagnosticsLine(collectWebGL2Diagnostics()),
+        `mod resolution guard: enabled=${getModResolutionGuardStats().enabled} level=${getModResolutionGuardStats().level} scale=${getModResolutionGuardStats().scale} canvases=${getModResolutionGuardStats().canvases}`,
+        `native stage: enabled=${getNativeStageStatsSnapshot().enabled} active=${getNativeStageStatsSnapshot().active} renderer=${getNativeStageStatsSnapshot().renderer} vulkan=${getNativeStageStatsSnapshot().vulkan} pipeline=${getNativeStageStatsSnapshot().pipeline} vulkanError=${getNativeStageStatsSnapshot().vulkanError || '(none)'} canvasMs=${getNativeStageStatsSnapshot().canvasMs} surface=${getNativeStageStatsSnapshot().surface} playing=${getNativeStageStatsSnapshot().playing} frames=${getNativeStageStatsSnapshot().frames}`,
         '',
         'visualizer backgrounds:',
         ...readVisualizerBackgroundLines(),
@@ -676,6 +694,11 @@ export const buildDiagnosticReport = async (): Promise<string> => {
     lines.push('', 'online playback trace:');
     lines.push(...(playbackLines.length ? playbackLines : ['  (none)']));
 
+    // Apple Music 在 Android 只在隐藏 WebView 里出声：起播没声音时，这一节是唯一的现场。
+    lines.push('', 'apple music (android webview):');
+    // 第一次要等页面把 Widevine 探完，比其它只读快照慢。
+    lines.push(...(await withDeadline(readAppleMusicDiagnosticLines(), 8000, ['  (timed out)'])));
+
     const lyricsLines = getLyricsDiagnosticLines();
     lines.push('', 'lyrics pipeline trace:');
     lines.push(...(lyricsLines.length ? lyricsLines : ['  (none)']));
@@ -686,7 +709,7 @@ export const buildDiagnosticReport = async (): Promise<string> => {
         lines.push(...qrLines.map(line => `  ${line}`));
     }
 
-    const crashEntries = await readCrashDiagnostics().catch(() => []);
+    const crashEntries = await withDeadline(readCrashDiagnostics().catch(() => []), 800, []);
     // 本地音频代理在播放器断开（切歌、拖动进度、Activity 销毁）时抛的 SocketException /
     // Connection reset 是预期的收尾，不是崩溃。以前它们会占满崩溃列表的 20 条、把真正的
     // 退出原因挤掉，所以单独归一行摘要，不进崩溃列表。
@@ -719,7 +742,7 @@ export const buildDiagnosticReport = async (): Promise<string> => {
         );
     }
 
-    const playbackDiagnostics = await readNativePlaybackDiagnostics();
+    const playbackDiagnostics = await withDeadline(readNativePlaybackDiagnostics(), 1200, null);
     lines.push('', 'lock screen artwork:');
     if (!playbackDiagnostics) {
         lines.push('  (native diagnostics unavailable)');

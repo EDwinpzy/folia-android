@@ -12,6 +12,7 @@ const CHUNK_ERROR_PATTERNS = [
     /importing a module script failed/i,
     /loading chunk \d+ failed/i,
     /chunk load error/i,
+    /unable to preload css/i,
 ];
 
 const attemptedChunks = new Set<string>();

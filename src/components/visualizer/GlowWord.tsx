@@ -5,6 +5,7 @@ import { buildWordGraphemeTimings } from '../../utils/lyrics/graphemeTiming';
 import { resolveThemeFontWeight } from '../../utils/fontStacks';
 import { wordGlowVariants } from './wordGlow';
 import { getGlowWordActiveEndTime, getGlowWordDisplayDuration, type GlowWordRenderProfile } from './glowWordTiming';
+import { GLOW_WORD_LINE_HEIGHT } from './glowWordOverlap';
 import { reducedGlowWordBodyVariants } from './glowWordVariants';
 import { useGlowWordStatus } from './useGlowWordStatus';
 
@@ -115,7 +116,7 @@ export const GlowWord = <TConfig extends { id: string }>({
             style={{
                 fontSize,
                 fontWeight: resolveThemeFontWeight(theme, 700),
-                lineHeight: 1.22,
+                lineHeight: GLOW_WORD_LINE_HEIGHT,
                 ...layoutStyle,
             }}
         >

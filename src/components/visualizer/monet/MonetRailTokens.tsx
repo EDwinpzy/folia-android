@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import { motion, motionValue, useTransform, MotionValue } from 'framer-motion';
 import { type GraphemeTiming } from '../../../utils/lyrics/graphemeTiming';
 import { getLineRenderEndTime } from '../../../utils/lyrics/renderHints';
-import { mixColors } from '../colorMix';
+import { colorWithAlpha, mixColors } from '../colorMix';
 import { resolveMonetFillWidth, resolveMonetGlow } from './monetLyricMotion';
 import { buildWordColorRangesFromMatchers, resolveTokenColorMap, type WordColorMatcher } from '../wordColoring';
 import { buildMonetDisplayTokens, measureMonetGraphemeOffsets, resolveMonetSweepEdgeSoftness, resolveMonetSweepEnd, resolveMonetWordStatus, type MonetLineStatus } from './monetLyricsModel';
@@ -26,7 +26,9 @@ export const MonetTimedTokenSpan: React.FC<{
     chorusAccentColor?: string;
     audioPower?: MotionValue<number>;
     renderStaticPassed?: boolean;
-}> = ({ entry, currentTime, accentColor, fontPx, fontStack, fontsEpoch, wordColorMatchers, isChorus, chorusAccentColor, audioPower, renderStaticPassed = false }) => {
+    /** The line runs right to left: each word's sweep fills from its right edge. */
+    rtl?: boolean;
+}> = ({ entry, currentTime, accentColor, fontPx, fontStack, fontsEpoch, wordColorMatchers, isChorus, chorusAccentColor, audioPower, renderStaticPassed = false, rtl = false }) => {
     const lineRenderEndTime = useMemo(() => getLineRenderEndTime(entry.line), [entry.line]);
     const tokens = useMemo(() => buildMonetDisplayTokens(entry.line), [entry.line]);
     const wordColorRanges = useMemo(
@@ -77,6 +79,7 @@ export const MonetTimedTokenSpan: React.FC<{
                         fontsEpoch={fontsEpoch}
                         isChorus={isChorus}
                         audioPower={audioPower}
+                        rtl={rtl}
                     />
                 ) : (
                     <span key={token.key} style={{ color: entry.tone.baseColor }}>
@@ -104,6 +107,7 @@ const MonetWordSweep: React.FC<{
     fontsEpoch: number;
     isChorus?: boolean;
     audioPower?: MotionValue<number>;
+    rtl: boolean;
 }> = ({
     text,
     startTime,
@@ -119,8 +123,10 @@ const MonetWordSweep: React.FC<{
     fontsEpoch,
     isChorus,
     audioPower,
+    rtl,
 }) => {
         const isLineActive = lineStatus === 'active';
+        const sweepAngle = rtl ? '270deg' : '90deg';
         const canRenderGlow = lineStatus === 'active' || lineStatus === 'passed';
         const graphemeOffsets = useMemo(
             () => measureMonetGraphemeOffsets(text, fontPx, fontSpec),
@@ -157,44 +163,57 @@ const MonetWordSweep: React.FC<{
             const solidEnd = Math.max(sweepEnd - edgeSoftness, 0);
             const featherStart = Math.max(sweepEnd - edgeSoftness * 0.55, 0);
             const featherEnd = Math.max(sweepEnd, 0);
-            return `linear-gradient(90deg, rgba(0, 0, 0, 1) 0px, rgba(0, 0, 0, 1) ${solidEnd}px, rgba(0, 0, 0, 0.92) ${featherStart}px, rgba(0, 0, 0, 0) ${featherEnd}px, rgba(0, 0, 0, 0) 100%)`;
+            // Offsets run from the word's start: its left edge, or its right edge in an RTL word.
+            return `linear-gradient(${sweepAngle}, rgba(0, 0, 0, 1) 0px, rgba(0, 0, 0, 1) ${solidEnd}px, rgba(0, 0, 0, 0.92) ${featherStart}px, rgba(0, 0, 0, 0) ${featherEnd}px, rgba(0, 0, 0, 0) 100%)`;
         });
 
-        // 已演唱部分的颜色。原来这里把一段渐变用 `background-clip: text` 裁进字形，但部分安卓
-        // WebView 不认「透明字 + 背景裁剪」这个组合，会退化成把整块背景按字形方框画出来 ——
-        // 看上去就是每个字一个方块。而「扫到哪」本来就由外层 mask-image 决定，所以改成实色。
-        const fillColor = useTransform(wordProgress, progress =>
-            mixColors(baseColor, wordColor, Math.min(progress, 1)),
-        );
+        const fillGradient = useTransform(wordProgress, progress => {
+            const color = mixColors(baseColor, wordColor, Math.min(progress, 1));
+            return `linear-gradient(${sweepAngle}, ${color} 0%, ${colorWithAlpha(color, 0.92)} 68%, ${colorWithAlpha(color, 0.72)} 100%)`;
+        });
 
         const resolvedBaseColor = useTransform(wordStatus, status =>
             (isLineActive && status === 'passed') || lineStatus === 'passed' ? wordColor : baseColor,
         );
 
-        const glowShadow = useTransform(glowTime, latest => {
-            if (!canRenderGlow || latest <= startTime) return 'none';
-
-            const intensity = resolveMonetGlow(latest, startTime, endTime, lineRenderEndTime);
-
-            if (intensity <= 0) return 'none';
-
+        // The glow is its own layer under the text: a halo fixed at full strength, faded by opacity.
+        // Interpolating the text-shadow itself repainted and re-rasterized every glowing word on every
+        // frame (on a 120 Hz Mac, most of this mode's raster and ~70 ms/s of GPU process); opacity on
+        // its own compositing layer is applied by the compositor. At full strength it is the old halo
+        // exactly; below it the halo keeps the word colour instead of leaning towards the base colour.
+        const glowOpacity = useTransform(glowTime, latest => {
+            if (!canRenderGlow || latest <= startTime) return 0;
+            return Math.max(0, resolveMonetGlow(latest, startTime, endTime, lineRenderEndTime));
+        });
+        // Composited only while it is lit, so idle words on the rail do not each hold a layer.
+        const glowWillChange = useTransform(glowOpacity, opacity => (opacity > 0 ? 'opacity' : 'auto'));
+        const glowHalo = useMemo(() => {
             const radiusOne = Math.round(fontPx * (isChorus ? 0.45 : 0.28));
             const radiusTwo = Math.round(fontPx * (isChorus ? 0.90 : 0.65));
-            const maxAlpha = isChorus ? 1.0 : 0.88;
-            const glowColor = mixColors(baseColor, wordColor, intensity, intensity * maxAlpha);
+            const glowColor = mixColors(baseColor, wordColor, 1, isChorus ? 1.0 : 0.88);
             return `0 0 ${radiusOne}px ${glowColor}, 0 0 ${radiusTwo}px ${glowColor}`;
-        }) as unknown as MotionValue<string>;
+        }, [baseColor, fontPx, isChorus, wordColor]);
 
         // Glyphs with deep descenders (g, j, p, y, and many CJK forms) sit below the line box
         // whenever the font's em box is taller than `line-height`, which drives half-leading
-        // negative. The sweep mask clips at its own border box, so it used to stop mid-glyph —
-        // more visibly the larger the font. Grow the box, then pull the text back so its position
-        // is unchanged.
+        // negative. `background-clip: text` paints no background outside the fill box and the mask
+        // clips at the overlay's border box, so the sweep used to stop mid-glyph — more visibly the
+        // larger the font. Grow both boxes, then pull the text back so its position is unchanged.
         const sweepOverflowPx = Math.round(fontPx * 0.5);
 
         return (
             <span className="relative inline-block whitespace-pre-wrap break-words">
-                <motion.span style={{ color: resolvedBaseColor, textShadow: glowShadow }}>
+                {canRenderGlow ? (
+                    <motion.span
+                        aria-hidden
+                        className="pointer-events-none absolute inset-0 block whitespace-pre-wrap break-words"
+                        style={{ color: 'transparent', textShadow: glowHalo, opacity: glowOpacity, willChange: glowWillChange }}
+                    >
+                        {text}
+                    </motion.span>
+                ) : null}
+                {/* relative so the text paints above the absolutely positioned glow, as it did above its own shadow. */}
+                <motion.span className="relative" style={{ color: resolvedBaseColor }}>
                     {text}
                 </motion.span>
                 {isLineActive ? (
@@ -222,7 +241,11 @@ const MonetWordSweep: React.FC<{
                                 marginTop: -sweepOverflowPx,
                                 paddingTop: sweepOverflowPx,
                                 paddingBottom: sweepOverflowPx,
-                                color: fillColor,
+                                color: 'transparent',
+                                WebkitTextFillColor: 'transparent',
+                                backgroundImage: fillGradient,
+                                WebkitBackgroundClip: 'text',
+                                backgroundClip: 'text',
                             }}
                         >
                             {text}

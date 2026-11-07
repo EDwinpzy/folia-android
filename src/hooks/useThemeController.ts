@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
-import { generateThemeFromLyrics, isMissingAiApiKeyError } from '../services/gemini';
+import { generateThemeFromLyrics, isMissingAiApiKeyError } from '../services/aiText';
 import { saveToCache } from '../services/db';
 import { DualTheme, LyricData, SongResult, StatusMessage, Theme, ThemeMode } from '../types';
 import { getCachedThemeState, getCachedThemeStateForSong, getLastDualTheme, getLastLegacyTheme, type ThemeCacheSongKey } from '../services/themeCache';
@@ -34,7 +34,7 @@ import {
     resolveBgModeTheme,
 } from './themeControllerState';
 import { getPlaybackSongKey } from '../utils/appPlaybackGuards';
-import { recordAiThemeSkip } from '../utils/aiThemeDiagnostics';
+import { usePlaybackStore } from '../stores/usePlaybackStore';
 import { setStatusMessage as setStatusMsg } from '../stores/useStatusMessageStore';
 import { useStableCallbacks } from './useStableCallbacks';
 
@@ -274,14 +274,8 @@ export function useThemeController({
                 }
             }
 
-            const baseTheme = getBaseTheme();
-            if (legacyTheme) {
-                return normalizeTheme({
-                    ...legacyTheme,
-                    backgroundColor: baseTheme.backgroundColor,
-                });
-            }
-
+            // The default source is the built-in theme itself: an AI or legacy theme stays loaded so the
+            // user can switch back to it, but lends none of its colors here (#947).
             return normalizeTheme(resolveBgModeTheme({
                 mode: bgMode === 'custom' ? 'default' : bgMode,
                 aiTheme,
@@ -578,13 +572,15 @@ export function useThemeController({
         if (currentSong) {
             await saveToCache(`dual_theme_${getPlaybackSongKey(currentSong)}`, coverTheme);
             saveSyncedThemeWithoutBlocking(currentSong, coverTheme, 'fallback');
-            setCurrentSongHasLocalAiTheme(true);
         }
 
         if (!shouldApply()) {
             return { status: 'generated', applied: false };
         }
 
+        if (currentSong) {
+            setCurrentSongHasLocalAiTheme(true);
+        }
         applyDualTheme(coverTheme);
         const customPreferred = bgMode === 'custom' && customTheme;
         setStatusMsg(origin === 'fallback'
@@ -613,8 +609,14 @@ export function useThemeController({
     ): Promise<GenerateAIThemeResult> => {
         const source = options.source ?? 'manual';
         const songKey = currentSong ? getPlaybackSongKey(currentSong) : '__no_song__';
+        // Read playback at completion time, even before React has rendered the next song.
+        // A late result may populate its own cache, but must not update another song's UI.
+        const shouldApply = () => {
+            const latestSong = usePlaybackStore.getState().currentSong;
+            const latestSongKey = latestSong ? getPlaybackSongKey(latestSong) : '__no_song__';
+            return latestSongKey === songKey && (options.shouldApply?.() ?? true);
+        };
         if (themeGenerationSongKeysRef.current.has(songKey)) {
-            recordAiThemeSkip('in-flight', source);
             return { status: 'skipped', reason: 'in-flight' };
         }
 
@@ -625,11 +627,9 @@ export function useThemeController({
             // The cover source never touches the model, so it also never needs a lyric prompt:
             // an instrumental with no title still gets a theme from its artwork.
             if (themeGenerationSource === 'cover') {
-                // 生成来源是「封面取色」时不会调用模型：报告里要能看出这一点，而不是「什么都没发生」。
-                recordAiThemeSkip('source-cover', source);
                 return await applyCoverDerivedTheme(
                     currentSong,
-                    () => options.shouldApply?.() ?? true,
+                    shouldApply,
                     'chosen',
                 );
             }
@@ -640,7 +640,6 @@ export function useThemeController({
             const promptText = (isPureMusic ? songTitle : allText) || allText;
 
             if (!promptText) {
-                recordAiThemeSkip('empty-prompt', source);
                 if (source === 'manual') {
                     setStatusMsg({ type: 'error', text: t('status.themeGenerationFailed') });
                 }
@@ -650,20 +649,20 @@ export function useThemeController({
             const dualTheme = await generateThemeFromLyrics(promptText, {
                 isPureMusic,
                 songTitle: songTitle || undefined,
-                trigger: source,
             });
             const normalizedDualTheme = applyStoredAnimationIntensityToDualTheme(sanitizeDualTheme(dualTheme));
             if (currentSong) {
                 await saveToCache(`dual_theme_${getPlaybackSongKey(currentSong)}`, normalizedDualTheme);
                 saveSyncedThemeWithoutBlocking(currentSong, normalizedDualTheme, source === 'auto' ? 'auto' : 'manual');
-                setCurrentSongHasLocalAiTheme(true);
             }
 
-            const shouldApply = options.shouldApply?.() ?? true;
-            if (!shouldApply) {
+            if (!shouldApply()) {
                 return { status: 'generated', applied: false };
             }
 
+            if (currentSong) {
+                setCurrentSongHasLocalAiTheme(true);
+            }
             applyDualTheme(normalizedDualTheme);
 
             const selectedTheme = getSelectedDualTheme(normalizedDualTheme, isDaylight);
@@ -680,12 +679,12 @@ export function useThemeController({
             if (isMissingAiApiKeyError(error)) {
                 return await applyCoverDerivedTheme(
                     currentSong,
-                    () => options.shouldApply?.() ?? true,
+                    shouldApply,
                     'fallback',
                 );
             }
 
-            if (options.shouldApply?.() ?? true) {
+            if (shouldApply()) {
                 setStatusMsg({ type: 'error', text: t('status.themeGenerationFailed') });
             }
             return { status: 'failed' };

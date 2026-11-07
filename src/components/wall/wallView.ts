@@ -28,15 +28,10 @@ export const getViewLineX = (view: WallView) => view.lineX ?? view.width / 2;
  * throws the tiles away and rasterizes the whole visible wall again, i.e. on every frame of a wheel glide,
  * a drag or a camera tween. Moving in whole device pixels keeps that fraction fixed, so panning only moves
  * tiles, the same way the browser snaps its own scroll offsets.
- *
- * 用二维 translate 而不是 translate3d：world 的实际 bounds 远超移动 GPU 的最大纹理尺寸，
- * translate3d 会把它提成常驻合成层，任何一张磁贴做尺寸动画都要在这个巨型层上重栅格化，
- * 在安卓 WebView 上表现为「选歌时整屏闪烁」。2D transform 不建层，pan 期间 Chromium 会临时提层、
- * 结束自动降级 —— 像素对齐和这一条要一起保留，缺一个都会掉回闪烁。
  */
 export const formatWorldTransform = (x: number, y: number, scale: number, devicePixelRatio = window.devicePixelRatio || 1) => {
     const snap = (value: number) => Math.round(value * devicePixelRatio) / devicePixelRatio;
-    return `translate(${snap(x)}px, ${snap(y)}px) scale(${scale})`;
+    return `translate3d(${snap(x)}px, ${snap(y)}px, 0) scale(${scale})`;
 };
 
 export const viewCenterFromCamera = (camera: WallViewCamera, view: WallView): WallViewCenter => ({
@@ -52,18 +47,19 @@ export const cameraFromViewCenter = (center: WallViewCenter, view: WallView): Wa
 
 /**
  * World rect on screen around a view centre. An open seam pushes the two halves apart, so the
- * horizontal span is widened by the seam width on both sides (as the prototype's culling does).
+ * horizontal span is widened by the seam width on both sides (as the prototype's culling does);
+ * a seam between two block rows (`seamHeight`) widens the vertical span the same way.
  */
 export const getViewWorldBounds = (
     center: WallViewCenter,
     view: WallView,
-    { seamWidth = 0, overscan = 0 }: { seamWidth?: number; overscan?: number } = {},
+    { seamWidth = 0, seamHeight = 0, overscan = 0 }: { seamWidth?: number; seamHeight?: number; overscan?: number } = {},
 ): Bounds => {
     const lineX = getViewLineX(view);
     return {
         left: center.x - (lineX + seamWidth) / view.scale - overscan,
         right: center.x + (view.width - lineX + seamWidth) / view.scale + overscan,
-        top: center.y - view.height / 2 / view.scale - overscan,
-        bottom: center.y + view.height / 2 / view.scale + overscan,
+        top: center.y - (view.height / 2 + seamHeight) / view.scale - overscan,
+        bottom: center.y + (view.height / 2 + seamHeight) / view.scale + overscan,
     };
 };

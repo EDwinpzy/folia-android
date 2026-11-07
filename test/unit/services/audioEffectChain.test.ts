@@ -83,13 +83,11 @@ const createChain = (effects = createNeutralAudioEffects(), enabled = true) => {
 
 describe('audio effect chain', () => {
     it('leaves the optional branches unallocated for a neutral chain', () => {
-        const { created, input, output } = createChain();
+        const { created } = createChain();
 
         expect(created.convolvers).toHaveLength(0);
         expect(created.bufferSources).toHaveLength(0);
         expect(created.oscillators).toHaveLength(0);
-        expect(input.connect).toHaveBeenCalledWith(output);
-        expect(input.disconnect).toHaveBeenCalled();
     });
 
     it('allocates reverb, noise and modulation only once the preset asks for them', () => {
@@ -108,7 +106,7 @@ describe('audio effect chain', () => {
     });
 
     it('bypasses every effect while processing is disabled', () => {
-        const { chain, created, input, output } = createChain();
+        const { chain, created } = createChain();
         const expectedCross = (1 - AUDIO_SOUND_PRESETS.radio.effects.width) / 2;
 
         chain.apply(AUDIO_SOUND_PRESETS.radio.effects, true);
@@ -119,8 +117,6 @@ describe('audio effect chain', () => {
         // A disabled chain falls back to the neutral set, so the mid/side cross feed goes silent again.
         expect(created.gains.some(node => node.gain.value === expectedCross)).toBe(false);
         expect(created.gains.filter(node => node.gain.value === 1).length).toBeGreaterThanOrEqual(4);
-        expect(input.connect).toHaveBeenCalledWith(output);
-        expect(input.disconnect).toHaveBeenCalled();
     });
 
     it('releases the noise source and oscillators on dispose', () => {

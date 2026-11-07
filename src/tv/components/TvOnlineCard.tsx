@@ -1,7 +1,7 @@
 import { memo } from 'react';
 import { Disc3, ListMusic, Radio, Sparkles } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import type { LibraryHomeCard } from '../../library/core/contracts/homeModel';
+import type { LibraryHomeCard } from '../../library/core/home/homeModel.contract';
 import { resolveTvCoverUrl, TV_COVER_SIZE } from '../services/tvPlaybackSource';
 
 // src/tv/components/TvOnlineCard.tsx

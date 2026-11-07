@@ -1,8 +1,8 @@
 // src/utils/frameRateLimiter.ts
 // Shared helpers and global RAF gate for optional visualizer frame throttling.
 
-import type { VisualizerFrameRate } from '../types';
 import { IS_ANDROID_WEBVIEW } from './platform';
+import type { VisualizerFrameRate } from '../types';
 
 type AnimationFrameCallback = FrameRequestCallback;
 type RequestAnimationFrameFn = (callback: AnimationFrameCallback) => number;
@@ -155,6 +155,20 @@ export const setGlobalVisualizerFrameRate = (frameRate: VisualizerFrameRate) => 
     }
 
     installedLimiter.setFrameRate(frameRate);
+};
+
+// Asks for the display's next frame, past the cap. For work that has to land in the same frame as
+// something the cap does not hold back: a library that took `requestAnimationFrame` before the cap
+// was switched on (framer-motion does, when its module loads) keeps running on every display frame.
+export const requestUncappedAnimationFrame = (callback: AnimationFrameCallback): number => {
+    const frameWindow = window as WindowWithVisualizerFrameRateLimiter;
+    return (frameWindow.__foliaNativeRequestAnimationFrame ?? window.requestAnimationFrame).call(window, callback);
+};
+
+// Cancels a frame asked for with `requestUncappedAnimationFrame`.
+export const cancelUncappedAnimationFrame = (handle: number) => {
+    const frameWindow = window as WindowWithVisualizerFrameRateLimiter;
+    (frameWindow.__foliaNativeCancelAnimationFrame ?? window.cancelAnimationFrame).call(window, handle);
 };
 
 export const restoreGlobalVisualizerFrameRateLimiter = () => {

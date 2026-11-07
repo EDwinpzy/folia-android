@@ -1,11 +1,11 @@
 import { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { LibraryHomeCard } from '../../library/core/contracts/homeModel';
+import type { LibraryHomeCard } from '../../library/core/home/homeModel.contract';
 import {
     DAILY_RECOMMENDATIONS_CARD_ID,
     isPersonalFmCard,
     onlineCardCollection,
-} from '../../library/core/model/homeCards';
+} from '../../library/core/home/homeCards';
 import type { SongResult } from '../../types';
 import type { ProviderCollection } from '../../types/onlineMusic';
 import type { TvAccountModel } from '../hooks/useTvAccount';

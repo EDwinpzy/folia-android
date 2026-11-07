@@ -40,6 +40,10 @@ const API_HOSTS = [
   // 封面与头像。前端会为了封面缓存 / 预加载直接 fetch 这些 CDN（coverCache、playedTrackCache、
   // useLocalCoverPreloader 都是 `mode: 'cors'`），漏掉一个就是「封面永远缓存不上」且不报错。
   // 整域名匹配，网易云的 p1/p2/... 与酷狗的 c1/imge 等子域一并覆盖。
+  // Spotify：登录后 Web API 走 /v1/*、图片与 30 秒试听走 CDN；不带进白名单就是跨域失败。
+  'spotify.com',
+  'spotifycdn.com',
+  'scdn.co',
   'y.gtimg.cn',
   'qlogo.cn',
   '126.net',
@@ -50,6 +54,30 @@ const API_HOSTS = [
   'y.qq.com',
   // QQ 的 QIMEI 设备指纹引导（参考实现的 android comm 带 QIMEI / QIMEI36，写接口尤其需要）。
   'api.tencentmusic.com',
+  // Car SDK（LunaOpenSDK）的开放接口、二维码与媒体 CDN：漏掉一个就是跨域失败或封面/音频取不到。
+  // 匹配整域名：open.qishui.com、open.douyin.com、open-client.douyin.com 都在下面。
+  'qishui.com',
+  'douyin.com',
+  'douyinpic.com',
+  'douyinvod.com',
+  'douyinscdn.com',
+  'douyinstatic.com',
+  'byteimg.com',
+  '365yg.com',
+  'bytefcdn.com',
+  'bytecdn.cn',
+  'byteicdn.com',
+  'ibytedtos.com',
+  'pstatp.com',
+  'snssdk.com',
+  'bytedance.com',
+  'bytetos.com',
+  'volcvideo.com',
+  'volccdn.com',
+  'volces.com',
+  'volcengineapi.com',
+  'zijieapi.com',
+  'zjcdn.com',
 ];
 
 type NativePlugin = {
@@ -304,6 +332,9 @@ const installFetchShim = (plugin: NativePlugin) => {
         bodyBase64: serialized.bodyBase64 || '',
         redirect: init?.redirect || request?.redirect || 'follow',
         timeoutMs: bridgeTimeoutMs,
+        // credentials:'omit' 的调用方（汽水的车机协议）自带 access-token / bd-ticket-guard-*，
+        // 不能带上 WebView 里别的站点的 cookie；Java 侧按这个字段决定是否加 OkHttp 的 cookie 头。
+        ...((init?.credentials ?? request?.credentials) === 'omit' ? { sendCookies: false } : {}),
       }),
       new Promise<never>((_resolve, reject) => {
         timeoutHandle = setTimeout(

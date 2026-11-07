@@ -11,7 +11,7 @@ vi.mock('@/services/foliaExtensionBridge', () => ({
     requestFoliaExtension: bridge.request,
 }));
 
-import { requestQq } from '@/services/onlineMusic/qqTransport';
+import { requestQq } from '@/services/onlineMusic/qq/qqTransport';
 
 // test/unit/onlineMusic/qqTransportBridge.test.ts
 //

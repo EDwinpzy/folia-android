@@ -2,13 +2,13 @@ import type {
     LibraryHomeFeedOwner,
     LibraryHomeFeedResource,
     LibraryHomeRadioFeed,
-} from '../../library/core/contracts/homeModel';
-import { onlineHomeFeedDeps } from '../../library/core/services/onlineHomeFeedDeps';
+} from '../../library/core/home/homeModel.contract';
+import { onlineHomeFeedDeps } from '../../library/core/home/online/onlineHomeFeedDeps.service';
 import {
     createFavoriteAlbumsFeed,
     createHomeFeedResource,
     HOME_FEED_RECOMMENDATION_LIMIT,
-} from '../../library/core/services/onlineHomeFeeds';
+} from '../../library/core/home/online/onlineHomeFeeds.service';
 import { omni } from '../../services/onlineMusic/omni';
 import type { SongResult } from '../../types';
 import type { ProviderCollection } from '../../types/onlineMusic';

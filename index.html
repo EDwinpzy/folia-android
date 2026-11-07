@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="referrer" content="no-referrer" />
     <meta name="description" content="一个动态歌词播放器，支持 AI 主题生成" />
     <meta name="theme-color" content="#09090b" />
@@ -21,11 +21,15 @@
     "react/": "https://aistudiocdn.com/react@^19.2.0/",
     "react": "https://aistudiocdn.com/react@^19.2.0",
     "framer-motion": "https://aistudiocdn.com/framer-motion@^12.23.24",
+    "pixi.js": "https://esm.sh/pixi.js@8.21.0",
+    "pixi": "https://esm.sh/pixi.js@8.21.0",
+    "three": "https://esm.sh/three@0.185.1",
+    "three/": "https://esm.sh/three@0.185.1/",
+    "opencc-js": "https://esm.sh/opencc-js@1.4.2",
     "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
     "lucide-react": "https://aistudiocdn.com/lucide-react@^0.554.0",
     "react-i18next": "https://aistudiocdn.com/react-i18next@^16.3.5",
-    "i18next": "https://aistudiocdn.com/i18next@^25.6.3",
-    "i18next-browser-languagedetector": "https://aistudiocdn.com/i18next-browser-languagedetector@^8.2.0"
+    "i18next": "https://aistudiocdn.com/i18next@^25.6.3"
   }
 }
 </script>
@@ -283,9 +287,8 @@
         }
       })();
 
-      // Last-resort startup guard: if the module bundle or React root never reaches its first
-      // effect, keep the user from staring at an endless loading animation. The splash is replaced
-      // with a tappable retry instead of disappearing into an unexplained blank page.
+      // 最后一道启动保险：模块包或 React 根节点一直没挂上时，别让用户对着永远转的加载动画。
+      // 12 秒后把遮罩换成可点按的重试，而不是无声无息的空白页。
       window.setTimeout(function () {
         var splash = document.getElementById('app-splash');
         if (!splash) {
@@ -295,7 +298,7 @@
           '<div style="display:flex;flex-direction:column;align-items:center;gap:14px;' +
           'color:#fff;font:14px/1.5 system-ui,sans-serif;text-align:center;padding:24px">' +
           '<div style="font-size:18px;font-weight:600">启动超时</div>' +
-          '<div style="opacity:.7">Startup timed out. Tap to reload.</div></div>';
+          '<div style="opacity:.7">启动超时，点按重新加载 / Startup timed out, tap to reload.</div></div>';
         splash.style.cursor = 'pointer';
         splash.addEventListener('click', function () {
           window.location.reload();

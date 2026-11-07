@@ -128,41 +128,69 @@ export const useTvFocus = (
 
     useEffect(() => {
         if (activeLayer === 'player') return undefined;
-        const root = document.getElementById(`tv-layer-${activeLayer}`);
-        if (!root) return undefined;
-
         let frame = 0;
-        const observer = new MutationObserver(() => {
-            window.cancelAnimationFrame(frame);
-            frame = window.requestAnimationFrame(() => {
-                const layer = activeLayerRef.current;
-                if (layer === 'player') return;
-                const current = getActiveTvFocusElement();
-                const currentKey = current?.dataset.tvFocusKey ?? null;
-                const preferredKey = focusDefaultRef.current?.[layer];
-                const entry = entryFocusRef.current;
-                if (isElementInLayer(current, layer)) {
-                    if (
-                        entry?.layer === layer
-                        && currentKey === entry.key
-                        && preferredKey
-                        && (entry.source === 'fallback' || preferredKey !== entry.preferredKey)
-                    ) {
-                        focusPreferred(layer);
-                    }
-                    return;
+        let layerObserver: MutationObserver | null = null;
+        let rootObserver: MutationObserver | null = null;
+        let stopped = false;
+
+        const focusIfNeeded = () => {
+            const layer = activeLayerRef.current;
+            if (layer === 'player') return;
+            const current = getActiveTvFocusElement();
+            const currentKey = current?.dataset.tvFocusKey ?? null;
+            const preferredKey = focusDefaultRef.current?.[layer];
+            const entry = entryFocusRef.current;
+            if (isElementInLayer(current, layer)) {
+                if (
+                    entry?.layer === layer
+                    && currentKey === entry.key
+                    && preferredKey
+                    && (entry.source === 'fallback' || preferredKey !== entry.preferredKey)
+                ) {
+                    focusPreferred(layer);
                 }
-                focusPreferred(layer);
+                return;
+            }
+            focusPreferred(layer);
+        };
+
+        const scheduleFocus = () => {
+            window.cancelAnimationFrame(frame);
+            frame = window.requestAnimationFrame(focusIfNeeded);
+        };
+
+        const observeLayer = (root: HTMLElement) => {
+            if (stopped) return;
+            layerObserver = new MutationObserver(scheduleFocus);
+            layerObserver.observe(root, {
+                childList: true,
+                subtree: true,
+                attributes: true,
+                attributeFilter: ['aria-disabled', 'disabled', 'hidden', 'style'],
             });
-        });
-        observer.observe(root, {
-            childList: true,
-            subtree: true,
-            attributes: true,
-            attributeFilter: ['aria-disabled', 'disabled', 'hidden', 'style'],
-        });
+            scheduleFocus();
+        };
+
+        const root = document.getElementById(`tv-layer-${activeLayer}`);
+        if (root) {
+            observeLayer(root);
+        } else {
+            // Lazy surfaces can suspend for a frame after the route changes. Keep watching until
+            // their layer root exists instead of leaving focus on BODY until the first D-pad press.
+            rootObserver = new MutationObserver(() => {
+                const mountedRoot = document.getElementById(`tv-layer-${activeLayer}`);
+                if (!mountedRoot) return;
+                rootObserver?.disconnect();
+                rootObserver = null;
+                observeLayer(mountedRoot);
+            });
+            rootObserver.observe(document.body, { childList: true, subtree: true });
+        }
+
         return () => {
-            observer.disconnect();
+            stopped = true;
+            layerObserver?.disconnect();
+            rootObserver?.disconnect();
             window.cancelAnimationFrame(frame);
         };
     }, [activeLayer, focusPreferred]);

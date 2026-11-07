@@ -290,12 +290,20 @@ html[data-folia-phone-fit='true'] [data-folia-track-title-text='true'] {
   min-height: 16px;
 }
 
-html[data-folia-phone-fit='true'] [data-folia-track-title-arrow='true'] {
+/* 实际标记写的是方向值（prev / next），按属性名匹配而不是写死 'true'。 */
+html[data-folia-phone-fit='true'] [data-folia-track-title-arrow] {
   width: 20px !important;
   height: 20px !important;
+  /* 触屏没有 hover：手机适配下切歌箭头常显，否则用户永远看不到它。 */
+  opacity: 0.72 !important;
 }
 
-html[data-folia-phone-fit='true'] [data-folia-track-title-arrow='true'] svg {
+html[data-folia-phone-fit='true'] [data-folia-track-title-arrow]:hover,
+html[data-folia-phone-fit='true'] [data-folia-track-title-arrow]:active {
+  opacity: 1 !important;
+}
+
+html[data-folia-phone-fit='true'] [data-folia-track-title-arrow] svg {
   width: 13px;
   height: 13px;
 }
@@ -308,24 +316,26 @@ html[data-folia-phone-fit='true'] [data-folia-track-title-text='true'] span {
   line-height: 1.1 !important;
 }
 
-/* Portrait phone fit: the default sub-sm layout stacks title, transport and progress into three
-   rows (~130px tall), which overlaps the upcoming-track panel. Collapse it to the same two-row
-   grid used by desktop while keeping phone-sized controls. */
+/* 竖屏播放条：固定成原版的两行布局和尺寸，不依赖 Tailwind 断点。
+   宽度上限 32rem（再大不超过视口）、播放键 48px、歌名 14px、槽位图标 20px。 */
 html[data-folia-phone-fit='true'][data-folia-phone-orientation='portrait'] [data-ponder='player-bar'] {
-  max-height: 66px;
-  padding: 6px 10px !important;
+  max-height: none !important;
+  padding: 8px 12px !important;
 }
 
 html[data-folia-phone-fit='true'][data-folia-phone-orientation='portrait'] [data-folia-player-bar-expanded='true'] {
-  width: min(calc(100vw - 40px), 22rem) !important;
-  max-width: min(calc(100vw - 40px), 22rem) !important;
+  width: min(calc(100vw - 40px), 32rem) !important;
+  max-width: min(calc(100vw - 40px), 32rem) !important;
+  /* 外层是 max-width:calc(100vw-120px) 的 flex 居中容器，不加这条会被压回 312px。 */
+  flex-shrink: 0 !important;
 }
 
-html[data-folia-phone-fit='true'][data-folia-phone-orientation='portrait'] [data-folia-player-bar-expanded='true'] > div {
+html[data-folia-phone-fit='true'][data-folia-phone-orientation='portrait'] [data-folia-player-bar-grid='true'] {
   grid-template-columns: auto minmax(0, 1fr) auto !important;
   grid-template-rows: auto auto !important;
-  column-gap: 8px !important;
-  row-gap: 2px !important;
+  column-gap: 10px !important;
+  row-gap: 4px !important;
+  align-items: center !important;
 }
 
 html[data-folia-phone-fit='true'][data-folia-phone-orientation='portrait'] [data-folia-player-bar-title='true'] {
@@ -333,24 +343,26 @@ html[data-folia-phone-fit='true'][data-folia-phone-orientation='portrait'] [data
   grid-row: 1 !important;
   display: flex;
   align-items: center;
+  justify-content: center;
   padding-inline: 0 !important;
-  min-height: 32px;
+  min-height: 48px;
   min-width: 0;
-  font-size: 12px !important;
-  line-height: 1.15 !important;
+  font-size: 14px !important;
+  line-height: 1.2 !important;
   text-align: center;
 }
 
 html[data-folia-phone-fit='true'][data-folia-phone-orientation='portrait'] [data-folia-player-bar-play='true'] {
   grid-column: 1 !important;
   grid-row: 1 !important;
-  width: 32px !important;
-  height: 32px !important;
+  width: 48px !important;
+  height: 48px !important;
+  justify-self: start;
 }
 
 html[data-folia-phone-fit='true'][data-folia-phone-orientation='portrait'] [data-folia-player-bar-play='true'] svg {
-  width: 14px;
-  height: 14px;
+  width: 19px;
+  height: 19px;
 }
 
 html[data-folia-phone-fit='true'][data-folia-phone-orientation='portrait'] [data-ponder-slots] {
@@ -360,16 +372,16 @@ html[data-folia-phone-fit='true'][data-folia-phone-orientation='portrait'] [data
   align-items: center;
   justify-content: flex-end;
   justify-self: end;
-  gap: 2px;
+  gap: 4px;
 }
 
 html[data-folia-phone-fit='true'][data-folia-phone-orientation='portrait'] [data-folia-player-bar-slot='true'] {
-  padding: 3px !important;
+  padding: 6px !important;
 }
 
 html[data-folia-phone-fit='true'][data-folia-phone-orientation='portrait'] [data-folia-player-bar-slot='true'] svg {
-  width: 15px !important;
-  height: 15px !important;
+  width: 20px !important;
+  height: 20px !important;
 }
 
 html[data-folia-phone-fit='true'][data-folia-phone-orientation='portrait'] [data-folia-player-bar-progress='true'] {
@@ -382,36 +394,17 @@ html[data-folia-phone-fit='true'][data-folia-phone-orientation='portrait'] [data
   display: flex;
   align-items: center;
   width: 100%;
-  min-height: 32px;
+  min-height: 48px;
 }
 
 html[data-folia-phone-fit='true'][data-folia-phone-orientation='portrait'] [data-folia-track-title-text='true'] span {
-  font-size: 12px !important;
+  font-size: 14px !important;
 }
 
-html[data-folia-phone-fit='true'] [data-folia-track-title-static='true'] {
-  display: block !important;
-  width: 100%;
-  min-width: 0;
-  padding-inline: 4px;
-  box-sizing: border-box;
-  font-size: 12px !important;
-  line-height: 32px !important;
-}
-
+/* 新版标题导航没有「静态标题层」，文字层本身就是常显的；手机适配别把它藏起来。 */
 html[data-folia-phone-fit='true'] [data-folia-track-title='true'] [data-folia-track-title-text='true'] {
-  display: none !important;
-}
-
-/* Pointer devices keep the upstream hover preview; touch devices keep the static title. */
-@media (hover: hover) and (pointer: fine) {
-  html[data-folia-phone-fit='true'] [data-folia-track-title='true']:hover [data-folia-track-title-static='true'] {
-    display: none !important;
-  }
-
-  html[data-folia-phone-fit='true'] [data-folia-track-title='true']:hover [data-folia-track-title-text='true'] {
-    display: flex !important;
-  }
+  display: flex !important;
+  align-items: center;
 }
 
 /* The right-side panel/gear toggle shares the bar's baseline; on a portrait phone it lands on top
@@ -535,4 +528,15 @@ html[data-folia-phone-fit='true'][data-folia-phone-orientation='landscape'] [dat
   html[data-folia-phone-fit='true'] [data-folia-audio-effects] .grid {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+/* 手机适配：标题文字层是 flex 容器，span 被规则改成 width:auto 后不会自己居中，
+   这里显式居中，否则歌名会贴着播放键左对齐（用户反馈「歌名错位」）。 */
+html[data-folia-phone-fit='true'] [data-folia-track-title='true'] [data-folia-track-title-text='true'] {
+  justify-content: center;
+}
+
+html[data-folia-phone-fit='true'] [data-folia-track-title='true'] [data-folia-track-title-text='true'] span {
+  width: 100%;
+  text-align: center;
 }

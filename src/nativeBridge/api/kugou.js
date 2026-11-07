@@ -1,7 +1,7 @@
 import CryptoJS from '../vendor/crypto-es.mjs';
 import { noteLibraryStep } from './libraryTrace.js';
 import { buildQrDataUrl } from './qrImage.js';
-import { krcDecrypt } from '../../utils/lyrics/providers/krcDecrypt';
+import { krcDecrypt } from '../../services/onlineMusic/kugou/krcDecrypt';
 import {
   clearCookieCache,
   getKGCookie as readKGCookie,
@@ -177,6 +177,13 @@ const KG_AUTH_REFRESH_TTL_MS = 50 * 60 * 1000;
 // 缺 vip_token 时的重试间隔：取不到就每 5 分钟再试一次，而不是每一首都打一次登录接口。
 const KG_VIP_TOKEN_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 let kgVipTokenRefreshAt = 0;
+// 会员详情（/user/vip/detail）探测的限流：它比单次 login_by_token 更全，能同时认出标准版与概念版会员，
+// 但不能每首歌都打一次。
+const KG_USER_VIP_PROBE_INTERVAL_MS = 5 * 60 * 1000;
+let kgUserVipProbeAt = 0;
+// 取链失败时现场补领概念版每日 VIP 的限流：失败/被拒的日子不要每首歌都打一次领取接口。
+const KG_CONCEPT_CLAIM_INTERVAL_MS = 10 * 60 * 1000;
+let kgConceptClaimAt = 0;
 // 单个登录网关的上限：一条不响应的线路不能把换取 vip_token 这件事整体拖住。
 const KG_AUTH_REFRESH_BASE_DEADLINE_MS = 8000;
 const KG_LOGIN_AES_KEY = 'c24f74ca2820225badc01946dba4fdf7';
@@ -642,6 +649,31 @@ async function refreshKGLoginByToken(cookieHeader) {
       const nextToken = String(data.token || data.t || '').trim();
       const vipToken = String(data.vip_token || data.vipToken || '').trim();
       const vipType = Number(data.vip_type || data.vipType || 0) || 0;
+      // 概念版会员不一定下发 vip_token / vip_type：同一份 data 里的 is_vip、svip_level、到期时间
+      // 同样能说明是不是会员；认不出来就会把概念版会员当免费账号，高音质和 VIP 曲目取不到链。
+      const isVipFlag = data.is_vip === true || Number(data.is_vip) === 1
+        || Number(data.svip_level) > 0
+        || Number(data.su_vip_end_time) > Date.now()
+        || (Number(data.vip_begin_time) > 0
+          && Number(data.m_end_time || data.vip_end_time || data.su_vip_end_time || 0) > Date.now());
+      const effectiveVipType = vipType || (vipToken ? 6 : (isVipFlag ? 6 : 0));
+      // 标准版刷新拿不到会员字段时，再问一次概念版的畅听 VIP：概念版会员只在这里能认出来。
+      let conceptVipType = 0;
+      if (!vipToken && effectiveVipType === 0) {
+        try {
+          conceptVipType = kgConceptVipTypeOf(await getKGYouthUnionVip(cookieHeader));
+        } catch (error) {
+          noteLibraryStep('kugou', 'auth:refresh:concept-vip:error', { message: error instanceof Error ? error.message : String(error) });
+        }
+      }
+      const resolvedVipType = effectiveVipType || conceptVipType;
+      if (!resolvedVipType && !vipToken) {
+        noteLibraryStep('kugou', 'auth:refresh:concept-vip:miss', {
+          hasVipToken: !!vipToken,
+          vipFlag: isVipFlag,
+          conceptVipType,
+        });
+      }
       if (!nextToken && !vipToken) continue;
       // Never overwrite browser web token with android token — only persist vip fields.
       try {
@@ -655,15 +687,17 @@ async function refreshKGLoginByToken(cookieHeader) {
         appToken: nextToken || '',
         sourceToken: token,
         vipToken,
-        vipType: vipType || (vipToken ? 6 : 0),
-        isVip: !!(vipType > 0 || vipToken || data.is_vip),
-        vipLabel: vipType === 33 || vipType === 4 ? '超级VIP' : (vipType || vipToken ? 'VIP' : ''),
+        vipType: resolvedVipType,
+        isVip: !!(resolvedVipType > 0 || vipToken || isVipFlag),
+        vipLabel: resolvedVipType === 33 || resolvedVipType === 4 ? '超级VIP' : (resolvedVipType ? 'VIP' : ''),
         authAt: Date.now(),
       });
       noteLibraryStep('kugou', 'auth:refresh:ok', {
         host: refreshHost,
         hasVipToken: !!vipToken,
-        vipType: vipType || (vipToken ? 6 : 0),
+        vipType: resolvedVipType,
+        vipFlag: isVipFlag,
+        conceptVipType,
         dataKeys: Object.keys(data || {}).slice(0, 20).join(','),
       });
       return {
@@ -735,7 +769,7 @@ async function ensureKGAndroidAuth(cookieHeader, opts) {
   };
 }
 
-function resolveKGEffectiveVipToken(cookieHeader, cached) {
+export function resolveKGEffectiveVipToken(cookieHeader, cached) {
   return kgCookieVipToken(cookieHeader) || (cached && cached.vipToken) || '';
 }
 
@@ -752,6 +786,18 @@ function mapKGUserCenterVipType(vipTypeRaw) {
   if (t === 7) return 3;
   if (t === 2) return 6;
   return t;
+}
+/**
+ * 概念版会员探测（/v1/get_union_vip，busi_type=concept）的答复里读出会员档位。
+ * 标准版看 vip_token/vip_type，概念版的畅听 VIP 只在这里能认出来；认不出来就按免费账号取链。
+ */
+export function kgConceptVipTypeOf(body) {
+  const data = (body && body.data) || body || {};
+  const direct = Number(data.vip_type || data.vipType || 0) || 0;
+  if (direct > 0) return mapKGUserCenterVipType(direct);
+  if (data.is_vip === true || Number(data.is_vip) === 1) return 6;
+  const business = Array.isArray(data.busi_vip) ? data.busi_vip : [];
+  return business.some((entry) => Number(entry && (entry.is_vip || entry.vip_type)) > 0) ? 6 : 0;
 }
 
 function kgApiBodyOk(body) {
@@ -996,9 +1042,13 @@ export async function getKGYouthUnionVip(cookieHeader) {
     },
     {},
   );
+  const unionData = (body && body.data) || {};
   noteLibraryStep('kugou', 'youth:union:done', {
     status: body && body.status,
     errorCode: body && body.error_code,
+    // 只记字段名不记值：概念版会员字段在不同版本里换过名字，报告要能看出实际下发的是哪些。
+    dataKeys: Object.keys(unionData).slice(0, 20).join(','),
+    busiVip: Array.isArray(unionData.busi_vip) ? unionData.busi_vip.length : 0,
   });
   return body || { status: 0, error_code: 401, data: {} };
 }
@@ -2152,7 +2202,7 @@ export async function getKGUserVipDetail(cookieHeader) {
   };
 }
 
-function mergeKGVipState(base, extra) {
+export function mergeKGVipState(base, extra) {
   base = base || { vipType: 0, isVip: false };
   extra = extra || { vipType: 0, isVip: false };
   const vipType = Math.max(Number(base.vipType) || 0, Number(extra.vipType) || 0);
@@ -2160,7 +2210,7 @@ function mergeKGVipState(base, extra) {
   return { vipType: vipType || (isVip ? 6 : 0), isVip };
 }
 
-function resolveKGTrackerVipType(cookieHeader, loginVipType) {
+export function resolveKGTrackerVipType(cookieHeader, loginVipType) {
   const fromCookie = kgCookieVipType(cookieHeader);
   if (fromCookie > 0) return String(fromCookie);
   if (Number(loginVipType) > 0) return String(loginVipType);
@@ -2169,7 +2219,7 @@ function resolveKGTrackerVipType(cookieHeader, loginVipType) {
   return '0';
 }
 
-function buildKGTrackerVipTypeCandidates(cookieHeader, loginVipType) {
+export function buildKGTrackerVipTypeCandidates(cookieHeader, loginVipType) {
   return [...new Set([
     resolveKGTrackerVipType(cookieHeader, loginVipType),
     String(kgCookieVipType(cookieHeader) || ''),
@@ -2191,7 +2241,7 @@ const KG_QUALITY_OPTIONS = [
   { level: 'standard', label: '标准', br: 128000 },
 ];
 
-function normalizeQualityPreference(value) {
+export function normalizeQualityPreference(value) {
   const raw = String(value || '').toLowerCase().trim();
   if (['jymaster', 'master', 'studio', 'svip', 'highest'].includes(raw)) return 'jymaster';
   if (['hires', 'hi-res', 'highres', 'zhenyin', 'spatial'].includes(raw)) return 'hires';
@@ -2201,7 +2251,7 @@ function normalizeQualityPreference(value) {
   return 'hires';
 }
 
-function qualityCandidatesFrom(target, candidates) {
+export function qualityCandidatesFrom(target, candidates) {
   target = normalizeQualityPreference(target);
   let start = candidates.findIndex((item) => item.level === target);
   if (start < 0) start = 0;
@@ -2217,7 +2267,7 @@ function extractKGQualityMap(extra, baseHash) {
   };
 }
 
-function pickKGHashForQuality(extra, baseHash, qualityPreference) {
+export function pickKGHashForQuality(extra, baseHash, qualityPreference) {
   const map = extractKGQualityMap(extra, baseHash);
   const order = qualityCandidatesFrom(normalizeQualityPreference(qualityPreference), KG_QUALITY_OPTIONS);
   for (const item of order) {
@@ -2965,6 +3015,30 @@ function normalizePlayUrl(url) {
   return 'http://fs.open.kugou.com/' + url.replace(/^\/+/, '');
 }
 
+/**
+ * 取链失败时要不要现场补领概念版每日 VIP：歌曲被拦、已登录、没有任何 VIP 凭证、
+ * 且距离上次尝试超过限流间隔才试。抽成纯函数以便单测（两版共用这段判断）。
+ */
+export function shouldClaimConceptVipOnFailure(input) {
+  const { blocked, loggedIn, hasVipToken, isVip } = input || {};
+  if (!blocked || !loggedIn || hasVipToken || isVip) return false;
+  const now = Number(input.now) || Date.now();
+  const lastAttemptAt = Number(input.lastAttemptAt) || 0;
+  const intervalMs = Number(input.intervalMs) > 0 ? Number(input.intervalMs) : KG_CONCEPT_CLAIM_INTERVAL_MS;
+  return (now - lastAttemptAt) > intervalMs;
+}
+// 概念版每日领取用的日期按中国日历算（官方客户端同款），不跟随设备时区。
+function chinaCalendarDate(date = new Date()) {
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
+    }).formatToParts(date);
+    const value = (type) => parts.find((part) => part.type === type)?.value || '';
+    return `${value('year')}-${value('month')}-${value('day')}`;
+  } catch (_) {
+    return new Date(date.getTime() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  }
+}
 export async function handleKGSongUrl(hash, albumId, albumAudioId, quality, cookieHeader, qualityHashes) {
   hash = String(hash || '').trim().toLowerCase();
   albumId = String(albumId || '').trim();
@@ -2981,13 +3055,41 @@ export async function handleKGSongUrl(hash, albumId, albumAudioId, quality, cook
   // 回 status=2（会员校验不通过），表现为「所有酷狗歌都取不到地址」。这里在缺 vip_token 时强制
   // 走一次 login_by_token 换取，并限流，避免每次播放都打一次登录接口。
   const loginBeforeVip = await getKGPlayContext(cookieHeader);
-  const vipTokenBefore = !!resolveKGEffectiveVipToken(cookieHeader, await loadKGVipSessionCache(loginBeforeVip.userId));
+  const vipCacheBefore = await loadKGVipSessionCache(loginBeforeVip.userId);
+  const vipTokenBefore = !!resolveKGEffectiveVipToken(cookieHeader, vipCacheBefore);
+  // 概念版会员没有 vip_token，但 .225 之后能以 vipType/isVip 记进缓存。认出来了就不再每 5 分钟
+  // 强制做一次 login_by_token（那是每次播放多 1-2 秒等待），只有缓存里没有任何会员线索时才刷新。
+  const vipRecognizedBefore = !!(vipCacheBefore && (vipCacheBefore.isVip || Number(vipCacheBefore.vipType) > 0));
   const shouldFetchVipToken = loginBeforeVip.loggedIn
     && !vipTokenBefore
+    && !vipRecognizedBefore
     && (Date.now() - kgVipTokenRefreshAt) > KG_VIP_TOKEN_REFRESH_INTERVAL_MS;
   if (shouldFetchVipToken) {
     kgVipTokenRefreshAt = Date.now();
     noteLibraryStep('kugou', 'auth:vip-token:refresh', { userId: String(loginBeforeVip.userId || '').slice(0, 6) });
+  } else if (vipRecognizedBefore && !vipTokenBefore) {
+    noteLibraryStep('kugou', 'auth:vip-token:skip', {
+      reason: 'vip-recognised-without-token',
+      vipType: Number(vipCacheBefore.vipType) || 0,
+    });
+  }
+  // 缓存里完全没有会员线索时，探一次 /user/vip/detail：它合并标准版/概念版/移动端的会员信息，
+  // 比只问概念版 union VIP 更全（概念版换字段时也能命中），并按 5 分钟限流。
+  if (loginBeforeVip.loggedIn && !vipTokenBefore && !vipRecognizedBefore
+    && (Date.now() - kgUserVipProbeAt) > KG_USER_VIP_PROBE_INTERVAL_MS) {
+    kgUserVipProbeAt = Date.now();
+    try {
+      const detail = await getKGUserVipDetail(cookieHeader);
+      noteLibraryStep('kugou', 'auth:user-vip:probe', {
+        isVip: !!(detail && detail.isVip),
+        vipType: Number(detail && detail.vipType) || 0,
+        error: (detail && detail.error) || '',
+      });
+    } catch (error) {
+      noteLibraryStep('kugou', 'auth:user-vip:probe:error', {
+        message: error instanceof Error ? error.message.slice(0, 120) : String(error).slice(0, 120),
+      });
+    }
   }
   const auth = await ensureKGAndroidAuth(cookieHeader, { requireAppToken: true, force: shouldFetchVipToken });
   cookieHeader = auth.cookieHeader || await enrichKGCookieHeader(cookieHeader, { preferAppToken: true });
@@ -3018,7 +3120,7 @@ export async function handleKGSongUrl(hash, albumId, albumAudioId, quality, cook
   }
   const qualityCode = picked.level === 'lossless' ? 'flac' : (picked.level === 'exhigh' ? 320 : 128);
   const cacheKey = buildKGPlayUrlCacheKey(playHash, albumId, albumAudioId, picked.level);
-  const login = await getKGPlayContext(cookieHeader);
+  let login = await getKGPlayContext(cookieHeader);
   const hasVipToken = !!resolveKGEffectiveVipToken(cookieHeader, await loadKGVipSessionCache(login.userId));
   const successPayload = (url, source) => ({
     provider: 'kg',
@@ -3084,6 +3186,18 @@ export async function handleKGSongUrl(hash, albumId, albumAudioId, quality, cook
         const forced = await ensureKGAndroidAuth(cookieHeader, { force: true, requireAppToken: true });
         cookieHeader = forced.cookieHeader || cookieHeader;
       }
+      // 强制刷新里同时做了标准版 token 刷新和概念版会员探测：用刷新后的登录态重试，
+      // 否则重试仍按刷新前的「免费账号」判断，概念版会员这一轮就白刷了。
+      const loginBeforeRetry = login;
+      login = await getKGPlayContext(cookieHeader);
+      if (login.vipType !== loginBeforeRetry.vipType || login.isVip !== loginBeforeRetry.isVip) {
+        noteLibraryStep('kugou', 'url:retry-vip-state', {
+          vipTypeBefore: Number(loginBeforeRetry.vipType) || 0,
+          vipTypeAfter: Number(login.vipType) || 0,
+          isVipBefore: !!loginBeforeRetry.isVip,
+          isVipAfter: !!login.isVip,
+        });
+      }
       const retry = await resolveKGSongPlayUrl(playHash, albumId, albumAudioId, cookieHeader, login, qualityCode);
       if (retry && retry.url) {
         writeKGPlayUrlCache(cacheKey, retry.url);
@@ -3106,6 +3220,44 @@ export async function handleKGSongUrl(hash, albumId, albumAudioId, quality, cook
         hasVipToken: currentVipToken,
         vipType: Number(login.vipType) || 0,
       });
+    }
+
+    // 概念版还有一条路：会员歌曲取不到链、账号又完全没有 VIP 时，现场领一次当天的畅听 VIP 再试。
+    // 已领过的那天服务端会拒绝，不会重复领取；标准版账号没领过时也可能受益，行为与官方客户端一致。
+    const stillBlocked = trackerResult.blocked || trackerResult.status === 2;
+    const cacheAfterRetry = await loadKGVipSessionCache(login.userId);
+    const hasVipTokenAfterRetry = !!resolveKGEffectiveVipToken(cookieHeader, cacheAfterRetry);
+    const shouldClaim = shouldClaimConceptVipOnFailure({
+      blocked: stillBlocked,
+      loggedIn: login.loggedIn,
+      hasVipToken: hasVipTokenAfterRetry,
+      isVip: !!login.isVip,
+      lastAttemptAt: kgConceptClaimAt,
+      intervalMs: KG_CONCEPT_CLAIM_INTERVAL_MS,
+    });
+    if (shouldClaim) {
+      kgConceptClaimAt = Date.now();
+      try {
+        const claimDay = chinaCalendarDate();
+        noteLibraryStep('kugou', 'vip:claim-on-fail:start', { day: claimDay });
+        await claimKGYouthDayVip(cookieHeader, claimDay);
+        await upgradeKGYouthDayVip(cookieHeader, login.userId);
+        const afterClaim = await resolveKGSongPlayUrl(playHash, albumId, albumAudioId, cookieHeader, login, qualityCode);
+        if (afterClaim && afterClaim.url) {
+          writeKGPlayUrlCache(cacheKey, afterClaim.url);
+          noteLibraryStep('kugou', 'url:hit', {
+            source: `${afterClaim.source}+concept-claim`,
+            ms: Date.now() - resolveStartedAt,
+            target: describeKGSchemeAndHost(afterClaim.url),
+          });
+          return successPayload(afterClaim.url, afterClaim.source);
+        }
+        noteLibraryStep('kugou', 'vip:claim-on-fail:miss', { status: (afterClaim && afterClaim.tracker && afterClaim.tracker.status) || 0 });
+      } catch (error) {
+        noteLibraryStep('kugou', 'vip:claim-on-fail:error', {
+          message: error instanceof Error ? error.message.slice(0, 120) : String(error).slice(0, 120),
+        });
+      }
     }
   } catch (_) {}
   const blocked = trackerResult.blocked || trackerResult.status === 2;

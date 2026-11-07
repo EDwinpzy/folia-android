@@ -35,6 +35,16 @@ import {
   handleQQGuessYouLike,
   handleQQDailySongs,
   handleQQRecommendPlaylists,
+    handleQQRecommendRadar,
+    handleQQSimilarSongs,
+    handleQQRadioList,
+    handleQQRadioTracks,
+    handleQQRecommendNewSongs,
+    handleQQRecommendNewAlbums,
+    handleQQRecommendToplists,
+    handleQQRecommendToplist,
+    handleQQRecommendCategories,
+    handleQQRecommendCategoryPlaylists,
   handleQQPlaylistTracksWrite,
   handleQQPlaylistSubscribe,
   handleQQSubscriptionStatus,
@@ -48,7 +58,6 @@ import {
 } from './qq-wechat-login.js';
 import { clearQQPlatformSessionCookies } from './qq-login-qr.js';
 import {
-  qqNativeCreateLoginQr,
   qqNativeCheckLoginQr,
   qqNativeCancelLoginQr,
 } from './qq-native-login.js';
@@ -83,6 +92,8 @@ import {
   handleKGUserCloud,
 } from './kugou.js';
 import { handleBodianRequest } from './bodian.js';
+import { handleQishuiRequest } from './qishui.js';
+import { handleSpotifyRequest } from './spotify.js';
 
 function firstValue(...values) {
   for (const value of values) {
@@ -533,17 +544,31 @@ async function handleLikeCheck(url, cookie) {
 
 async function handleDailyRecommend(url, cookie) {
   const afresh = String(firstValue(url.searchParams.get('afresh'), 'false')) === 'true';
-  const paths = afresh
-    ? ['/api/v3/discovery/recommend/songs', '/api/recommend/songs']
-    : ['/api/v3/discovery/recommend/songs'];
+  const params = { limit: 30, offset: 0, total: true, n: 1000, ...(afresh ? { afresh: true } : {}) };
+  // 每日推荐试两条上游路径、两种签名：不同客户端版本上 v3 eapi 可能被拒（code 400/301），
+  // 旧接口或 weapi 仍能回同一批歌。全部失败才报错，并留痕说明试过哪些。
+  const attempts = [
+    { name: 'eapi-v3', run: () => eapiJson('/api/v3/discovery/recommend/songs', {}, cookie) },
+    { name: 'weapi-v3', run: () => weapiJson('/api/v3/discovery/recommend/songs', params, cookie) },
+    { name: 'eapi-legacy', run: () => eapiJson('/api/recommend/songs', {}, cookie) },
+    { name: 'weapi-legacy', run: () => weapiJson('/api/recommend/songs', params, cookie) },
+  ];
+  const tried = [];
   let lastError = null;
-  for (const path of paths) {
+  for (const attempt of attempts) {
     try {
-      return await eapiJson(path, {}, cookie);
+      const body = await attempt.run();
+      const songs = Array.isArray(body?.data?.dailySongs) ? body.data.dailySongs
+        : Array.isArray(body?.dailySongs) ? body.dailySongs
+          : Array.isArray(body?.songs) ? body.songs : [];
+      noteLibraryStep('netease', 'explore:daily:source', { via: attempt.name, songs: songs.length, code: body?.code });
+      return body;
     } catch (error) {
+      tried.push(attempt.name);
       lastError = error;
     }
   }
+  noteLibraryStep('netease', 'explore:daily:failed', { tried: tried.join(',') });
   throw lastError || new Error('Daily recommendation request failed');
 }
 
@@ -555,17 +580,37 @@ async function handleHistoryRecommend(url, cookie) {
 
 async function handlePersonalFm(url, cookie) {
   const mode = url.searchParams.get('mode');
+  const submode = url.searchParams.get('submode');
+  noteLibraryStep('netease', 'fm:request', { mode: mode || 'DEFAULT', submode: submode || '' });
+  const startedAt = Date.now();
+  const settle = (label, result) => {
+    const songs = Array.isArray(result?.data) ? result.data.length : -1;
+    noteLibraryStep('netease', `fm:${label}`, { mode: mode || 'DEFAULT', code: result?.code, songs, ms: Date.now() - startedAt });
+    return result;
+  };
   if (!mode || mode === 'DEFAULT') {
-    return await eapiJson('/api/v1/radio/get', {}, cookie);
+    try {
+      return settle('default', await eapiJson('/api/v1/radio/get', {}, cookie));
+    } catch (error) {
+      noteLibraryStep('netease', 'fm:default:error', { message: error instanceof Error ? error.message : String(error), ms: Date.now() - startedAt });
+      throw error;
+    }
   }
   const body = { mode };
-  const submode = url.searchParams.get('submode');
   if (submode) body.submode = submode;
   try {
     const result = await eapiJson('/api/personal/fm/mode', body, cookie);
-    if (Array.isArray(result?.data) && result.data.length) return result;
-  } catch (_) {}
-  return await eapiJson('/api/v1/radio/get', {}, cookie);
+    if (Array.isArray(result?.data) && result.data.length) return settle('mode', result);
+    noteLibraryStep('netease', 'fm:mode:empty', { mode, submode: submode || '', code: result?.code, ms: Date.now() - startedAt });
+  } catch (error) {
+    noteLibraryStep('netease', 'fm:mode:error', { mode, message: error instanceof Error ? error.message : String(error), ms: Date.now() - startedAt });
+  }
+  try {
+    return settle('fallback', await eapiJson('/api/v1/radio/get', {}, cookie));
+  } catch (error) {
+    noteLibraryStep('netease', 'fm:fallback:error', { message: error instanceof Error ? error.message : String(error), ms: Date.now() - startedAt });
+    throw error;
+  }
 }
 
 async function handlePlaylistTracks(url, body, cookie) {
@@ -681,20 +726,14 @@ async function routeFoliaQqRequest(operation, params, segments, url, cookie) {
       });
       return { code: 200, data: { code: 200, unikey: key } };
     } catch (error) {
-      noteLibraryStep('qq', 'web-login:fallback', {
+      noteLibraryStep('qq', 'web-login:failed', {
         message: String((error && error.message) || error).slice(0, 120),
       });
+      // 不再降级到原生安卓扫码：那条通道只有 musickey，没有 p_skey/skey，
+      // 登进去能看歌单、能播免费歌，但 VIP 歌每档都回 104003。
+      // 宁可让这次登录失败并提示重试，也不要生成一个「看似登录成功、实际播不了 VIP」的会话。
+      throw new Error('QQ 网页登录暂时不可用，请稍后重试；已禁用会丢失 VIP 播放权的快速登录');
     }
-
-    // 网页通道建不起来才用原生安卓扫码兜底。
-    const nativeQr = await qqNativeCreateLoginQr();
-    const nativeKey = encodeBridgeKey({
-      channel,
-      native: true,
-      qrcodeId: nativeQr.qrcodeId,
-      qrimg: nativeQr.qrimg,
-    });
-    return { code: 200, data: { code: 200, unikey: nativeKey } };
   }
   if (operation === 'login_qr_create') {    const key = decodeBridgeKey(firstValue(params.key, url.searchParams.get('key')));
     return {
@@ -1026,6 +1065,42 @@ async function routeFoliaQqRequest(operation, params, segments, url, cookie) {
     const limit = numberValue(params.limit, 25);
     return await handleQQRecommendPlaylists(limit, cookie);
   }
+  // ---- 探索页（0.7.21 的 qqExplore.ts 用；之前缺这组路由导致整页失败）----
+  if (operation === 'recommend_radar') {
+    return await handleQQRecommendRadar(numberValue(params.page, 1), cookie);
+  }
+  if (operation === 'recommend_new_songs') {
+    return await handleQQRecommendNewSongs(params.area ?? params.type, cookie);
+  }
+  if (operation === 'recommend_new_albums') {
+    return await handleQQRecommendNewAlbums(numberValue(params.offset, 0), numberValue(params.limit, 12), cookie);
+  }
+  if (operation === 'recommend_toplists') {
+    return await handleQQRecommendToplists(cookie);
+  }
+  if (operation === 'recommend_toplist') {
+    return await handleQQRecommendToplist(
+      params.id, numberValue(params.offset, 0), numberValue(params.limit, 12),
+      firstValue(params.period, ''), cookie,
+    );
+  }
+  if (operation === 'recommend_categories') {
+    return await handleQQRecommendCategories();
+  }
+  if (operation === 'recommend_category_playlists') {
+    return await handleQQRecommendCategoryPlaylists(
+      params.id, numberValue(params.page, 1), numberValue(params.limit, 12), cookie,
+    );
+  }
+  if (operation === 'radio_list') {
+    return await handleQQRadioList(cookie);
+  }
+  if (operation === 'radio_tracks') {
+    return await handleQQRadioTracks(params.id, cookie);
+  }
+  if (operation === 'song_similar') {
+    return await handleQQSimilarSongs(params.id, cookie);
+  }
   // ---- 写入：正文已经在 mergeOperationParams 里并进 params，不重试 ----
   if (operation === 'user_playlist_tracks') {
     return await handleQQPlaylistTracksWrite(params, cookie);
@@ -1332,8 +1407,14 @@ async function handleFoliaKugouRequest(input, url) {
 
 export async function handleFoliaApiRequest(input) {
   const { url, body, method } = parseInput(input);
+  if (input?.provider === 'spotify') {
+    return await handleSpotifyRequest(String(input.operation || ''), input.params || body || {});
+  }
   if (input?.provider === 'bodian') {
     return await handleBodianRequest(String(input.operation || ''), input.params || body || {});
+  }
+  if (input?.provider === 'qishui') {
+    return await handleQishuiRequest(String(input.operation || ''), input.params || body || {});
   }
   if (input?.provider === 'qq') {
     return await handleFoliaQqRequest(input, url);
@@ -1347,9 +1428,16 @@ export async function handleFoliaApiRequest(input) {
     }
     return await qqMusicRequest(body, await getQQCookie());
   }
-  const cookie = await getNeteaseCookie();
+  // 安卓上渲染层把登录 cookie 存成会话值随请求带来（query.cookie）；带 cookie 的先用。
+  // 这一行在 params 声明之前：直接用 url.searchParams，避免 TDZ（线上表现是「Cannot access 's' before initialization」）。
+  const cookie = firstValue(url.searchParams.get('cookie'), body.cookie) || await getNeteaseCookie();
   const path = url.pathname;
   const params = url.searchParams;
+  // 电台/推荐相关请求才留痕（全量留痕会把诊断窗口挤满，电台那几行反而被裁掉）。
+  if (path === '/personal_fm' || path === '/personal/fm/mode' || path === '/recommend/songs'
+    || path === '/personalized' || path === '/fm_trash') {
+    noteLibraryStep('netease', 'radio:request', { path, mode: params.get('mode') || '', submode: params.get('submode') || '' });
+  }
 
   if (path === '/register/anonimous') {
     return { code: 200, cookie: '', anonymous: true };
@@ -1420,6 +1508,77 @@ export async function handleFoliaApiRequest(input) {
       limit: numberValue(params.get('limit'), 35),
     }, cookie);
   }
+  // ── 探索页用的上游接口 ───────────────────────────────────────────────
+  // 0.7.21 的探索适配器用到的这批路由在 .196 的桥里没有（只有 /personalized/playlist），
+  // 于是每个平台一进探索页就整页失败。这里按 NeteaseCloudMusicApi 的请求语义补齐。
+  if (path === '/toplist') {
+    noteLibraryStep('netease', 'explore:route', { path });
+    return await weapiJson('/api/toplist', {}, cookie);
+  }
+  if (path === '/album/new') {
+    noteLibraryStep('netease', 'explore:route', { path });
+    return await weapiJson('/api/album/new', {
+      area: 'ALL',
+      limit: numberValue(params.get('limit'), 30),
+      offset: numberValue(params.get('offset'), 0),
+      total: true,
+    }, cookie);
+  }
+  if (path === '/top/playlist') {
+    noteLibraryStep('netease', 'explore:route', { path });
+    return await weapiJson('/api/playlist/list', {
+      cat: firstValue(params.get('cat'), '全部'),
+      order: firstValue(params.get('order'), 'hot'),
+      limit: numberValue(params.get('limit'), 30),
+      offset: numberValue(params.get('offset'), 0),
+      total: true,
+    }, cookie);
+  }
+  if (path === '/recommend/resource') {
+    noteLibraryStep('netease', 'explore:route', { path });
+    // 每日推荐歌单：weapi 的账号类接口要求 csrf_token 与 cookie 里的 __csrf 一致，空串会被答 301
+    //（报告里表现为 playlistsCode=301、歌单数 0）；答不出时再换 eapi 试一次。
+    const csrf = (() => {
+      try {
+        return parseCookieString(cookie).__csrf || '';
+      } catch (_) {
+        return '';
+      }
+    })();
+    try {
+      return await weapiJson('/api/v1/discovery/recommend/resource', { csrf_token: csrf }, cookie);
+    } catch (error) {
+      noteLibraryStep('netease', 'explore:daily-playlists:fallback', {
+        message: error instanceof Error ? error.message.slice(0, 120) : String(error).slice(0, 120),
+      });
+      return await eapiJson('/api/v1/discovery/recommend/resource', {}, cookie);
+    }
+  }
+  if (path === '/simi/song') {
+    noteLibraryStep('netease', 'explore:route', { path });
+    return await weapiJson('/api/v1/discovery/simiSong', {
+      songid: numberValue(params.get('id'), 0),
+      limit: 50,
+      offset: 0,
+    }, cookie);
+  }
+  if (path === '/top/song') {
+    noteLibraryStep('netease', 'explore:route', { path });
+    return await weapiJson('/api/v1/discovery/new/songs', {
+      areaId: numberValue(params.get('type'), 0),
+      limit: 100,
+      offset: 0,
+      total: true,
+    }, cookie);
+  }
+  if (path === '/homepage/block/page') {
+    noteLibraryStep('netease', 'explore:route', { path });
+    const cursor = params.get('cursor');
+    return await weapiJson('/api/homepage/block/page', {
+      refresh: params.get('refresh') !== 'false',
+      ...(cursor ? { cursor } : {}),
+    }, cookie);
+  }
   if (path === '/fm_trash') {
     const id = firstValue(params.get('id'), body.id);
     return await eapiJson('/api/radio/trash', { id }, cookie);
@@ -1439,7 +1598,9 @@ export async function handleFoliaApiRequest(input) {
 }
 
 export async function getFoliaBridgeStatus() {
-  const cookie = await getNeteaseCookie();
+  // 安卓上渲染层把登录 cookie 存成会话值随请求带来（query.cookie）；带 cookie 的先用。
+  // 这一行在 params 声明之前：直接用 url.searchParams，避免 TDZ（线上表现是「Cannot access 's' before initialization」）。
+  const cookie = firstValue(url.searchParams.get('cookie'), body.cookie) || await getNeteaseCookie();
   const info = await getLoginInfo(cookie);
   return {
     netease: {

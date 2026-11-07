@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from 'vitest';
-import { createFrameRateLimitedRaf, installGlobalVisualizerFrameRateLimiter, parseVisualizerFrameRate, setGlobalVisualizerFrameRate, shouldProcessFrameAtRate, VISUALIZER_FRAME_RATE_OPTIONS } from '../../../src/utils/frameRateLimiter';
+import { describe, expect, it } from 'vitest';
+import { cancelUncappedAnimationFrame, createFrameRateLimitedRaf, installGlobalVisualizerFrameRateLimiter, parseVisualizerFrameRate, requestUncappedAnimationFrame, setGlobalVisualizerFrameRate, shouldProcessFrameAtRate } from '../../../src/utils/frameRateLimiter';
 
 // test/unit/utils/frameRateLimiter.test.ts
 
@@ -14,11 +14,6 @@ describe('frameRateLimiter', () => {
         expect(parseVisualizerFrameRate('30')).toBe(30);
         expect(parseVisualizerFrameRate('15')).toBe('off');
         expect(parseVisualizerFrameRate('24')).toBe('off');
-    });
-
-    it('offers 30 FPS in the settings options', () => {
-        expect(VISUALIZER_FRAME_RATE_OPTIONS).toContain(30);
-        expect(VISUALIZER_FRAME_RATE_OPTIONS).toEqual([30, 60, 90, 120]);
     });
 
     it('skips frames until the target interval has elapsed', () => {
@@ -178,69 +173,66 @@ describe('frameRateLimiter', () => {
         }
     });
 
-    // 安卓手机 WebView 上，用户从未手动设置过帧率时默认 30FPS（绘制次数减半、明显降温省电）。
-    // 用户一旦手动选过（storage 有值）或调用方显式覆盖，就永远以用户为准。
-    describe('Android WebView default frame rate', () => {
-        const installFakeWindow = (storedValue: string | null) => {
-            const nativeCallbacks: FrameRequestCallback[] = [];
-            const fakeWindow = {
-                Capacitor: { getPlatform: () => 'android' },
+    it('reaches every display frame through the uncapped request while the cap is on', () => {
+        const previousWindow = (globalThis as { window?: Window; }).window;
+        const displayQueue = new Map<number, FrameRequestCallback>();
+        let nextDisplayHandle = 1;
+        Object.defineProperty(globalThis, 'window', {
+            configurable: true,
+            value: {
                 requestAnimationFrame: (callback: FrameRequestCallback) => {
-                    nativeCallbacks.push(callback);
-                    return nativeCallbacks.length;
+                    displayQueue.set(nextDisplayHandle, callback);
+                    nextDisplayHandle += 1;
+                    return nextDisplayHandle - 1;
                 },
-                cancelAnimationFrame: () => undefined,
-                localStorage: { getItem: () => storedValue },
+                cancelAnimationFrame: (handle: number) => {
+                    displayQueue.delete(handle);
+                },
+                localStorage: { getItem: () => null },
+            },
+        });
+        const runDisplayFrame = (timestamp: number) => {
+            const callbacks = Array.from(displayQueue.values());
+            displayQueue.clear();
+            callbacks.forEach(callback => callback(timestamp));
+        };
+
+        try {
+            // Asked for before the cap is switched on and cancelled after it: the handle is the display's own.
+            let cancelledRan = false;
+            const cancelled = requestUncappedAnimationFrame(() => {
+                cancelledRan = true;
+            });
+            installGlobalVisualizerFrameRateLimiter(60);
+            cancelUncappedAnimationFrame(cancelled);
+
+            let capped = 0;
+            let uncapped = 0;
+            const countCapped = () => {
+                capped += 1;
+                globalThis.window.requestAnimationFrame(countCapped);
             };
-            Object.defineProperty(globalThis, 'window', { configurable: true, value: fakeWindow });
-            return { fakeWindow, nativeCallbacks };
-        };
+            const countUncapped = () => {
+                uncapped += 1;
+                requestUncappedAnimationFrame(countUncapped);
+            };
+            globalThis.window.requestAnimationFrame(countCapped);
+            requestUncappedAnimationFrame(countUncapped);
 
-        // 在 1 秒的密集时间线里推原生帧，数实际被放过的帧数。
-        const countFramesPerSecond = (fakeWindow: { requestAnimationFrame: (cb: FrameRequestCallback) => number; cancelAnimationFrame: () => void }, nativeCallbacks: FrameRequestCallback[]) => {
-            let runs = 0;
-            const tick = () => { runs += 1; fakeWindow.requestAnimationFrame(tick); };
-            fakeWindow.requestAnimationFrame(tick);
-            for (let t = 0; t <= 1000; t += 16) {
-                const pending = nativeCallbacks.splice(0);
-                for (const callback of pending) callback(t);
+            // Twelve frames of a 120 Hz display under a cap of 60.
+            for (let frame = 1; frame <= 12; frame += 1) {
+                runDisplayFrame(frame * (1000 / 120));
             }
-            return runs;
-        };
 
-        it('caps at 30 FPS when nothing was ever stored', async () => {
-            vi.resetModules();
-            const previousWindow = (globalThis as { window?: unknown }).window;
-            try {
-                const { fakeWindow, nativeCallbacks } = installFakeWindow(null);
-                const platform = await import('../../../src/utils/platform');
-                const limiter = await import('../../../src/utils/frameRateLimiter');
-                expect(platform.IS_ANDROID_WEBVIEW).toBe(true);
-
-                limiter.installGlobalVisualizerFrameRateLimiter();
-                const runs = countFramesPerSecond(fakeWindow, nativeCallbacks);
-                // 30FPS ≈ 30 帧/秒；60FPS 会到 60 上下，所以上界卡在 40 就足以区分。
-                expect(runs).toBeGreaterThan(20);
-                expect(runs).toBeLessThanOrEqual(40);
-            } finally {
-                Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow });
-                vi.resetModules();
-            }
-        });
-
-        it('keeps the stored rate when the user has chosen one', async () => {
-            vi.resetModules();
-            const previousWindow = (globalThis as { window?: unknown }).window;
-            try {
-                const { fakeWindow, nativeCallbacks } = installFakeWindow('120');
-                const limiter = await import('../../../src/utils/frameRateLimiter');
-                limiter.installGlobalVisualizerFrameRateLimiter();
-                const runs = countFramesPerSecond(fakeWindow, nativeCallbacks);
-                expect(runs).toBeGreaterThan(40);
-            } finally {
-                Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow });
-                vi.resetModules();
-            }
-        });
+            expect(cancelledRan).toBe(false);
+            expect(uncapped).toBe(12);
+            expect(capped).toBe(6);
+        } finally {
+            setGlobalVisualizerFrameRate('off');
+            Object.defineProperty(globalThis, 'window', {
+                configurable: true,
+                value: previousWindow,
+            });
+        }
     });
 });

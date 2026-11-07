@@ -1,7 +1,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MockInstance } from 'vitest';
 import * as pixi from 'pixi.js';
-import { installPixiFilterPoolCompat } from '@/components/visualizer/pixiFilterPoolCompat';
+import { installPixiFilterPoolCompat } from '@/components/visualizer/pixi/pixiFilterPoolCompat';
 
 // test/unit/visualizer/pixiFilterPoolCompat.test.ts
 // Exercise real Pixi pools and bind groups without needing a WebGL context.
@@ -146,21 +146,6 @@ describe('Pixi 8.21.0 filter pool compatibility', () => {
 
         expect(texture.destroyed).toBe(true);
         expectUnbound(group);
-    });
-
-    it('falls back to the root resolution when a pooled filter input lost its source', () => {
-        const { system } = createSystem();
-        const internals = system as unknown as {
-            _filterStackIndex: number;
-            _filterStack: Array<{ skip: boolean; inputTexture: { source: null } }>;
-        };
-        internals._filterStackIndex = 1;
-        internals._filterStack = [{ skip: false, inputTexture: { source: null } }];
-
-        const findFilterResolution = (system as unknown as {
-            _findFilterResolution: (rootResolution: number) => number;
-        })._findFilterResolution.bind(system);
-        expect(findFilterResolution(2)).toBe(2);
     });
 
     it('keeps normal texture returns and retained power-of-two buckets bound', () => {

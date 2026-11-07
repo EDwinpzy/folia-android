@@ -3,6 +3,7 @@ import {
   getQQCookie,
   parseCookieString,
   qqCookieAvatar,
+  qqCookieHasWebAuth,
   qqCookieMusicKey,
   qqCookieNickname,
   qqCookiePlaybackKey,
@@ -112,6 +113,7 @@ function playbackRestriction(provider, category, message, action, extra) {
 function classifyQQPlaybackRestriction(info, session) {
   const hasSession = typeof session === 'object' ? !!session.hasSession : !!session;
   const hasPlaybackKey = typeof session === 'object' ? !!session.hasPlaybackKey : hasSession;
+  const hasWebAuth = typeof session === 'object' ? session.hasWebAuth !== false : hasSession;
   const rawMsg = String((info && (info.msg || info.tips || info.errmsg || info.message)) || '').trim();
   const code = Number((info && (info.result || info.code || info.errtype)) || 0);
   const lower = rawMsg.toLowerCase();
@@ -120,6 +122,12 @@ function classifyQQPlaybackRestriction(info, session) {
   }
   if (!hasPlaybackKey && code === 104003) {
     return playbackRestriction('qq', 'login_required', 'QQ 音乐当前只拿到了网页登录状态，还缺少播放授权，请重新打开 y.qq.com 完成登录', 'login', { code, rawMessage: rawMsg, missingPlaybackKey: true });
+  }
+  if (code === 104003 && !hasWebAuth) {
+    // 快速扫码/微信通道只有 musickey，没有网页登录的 p_skey/skey：VIP 歌会逐档回 104003。
+    return playbackRestriction('qq', 'login_required',
+      '当前 QQ 登录没有拿到网页播放授权（p_skey/skey），VIP 歌曲会被 QQ 拒绝。请退出 QQ 音乐登录后重新用 QQ 扫码，等网页登录完成再试。',
+      'login', { code, rawMessage: rawMsg, missingWebAuth: true });
   }
   if (code === 104003) {
     // 现场实测：非会员账号点 VIP 歌时，逐档音质都回 104003 且 purl 为空；同一账号的免费歌能正常播。
@@ -706,6 +714,8 @@ export async function handleQQSongUrl(mid, mediaMid, qualityPreference, cookieHe
   const uin = qqCookieUin(cookieHeader) || '0';
   const musicKey = qqCookieMusicKey(cookieHeader);
   const playbackKey = qqCookiePlaybackKey(cookieHeader);
+  // 新版 UrlGetVkey 的 uin 用的是音乐账号 id（str_musicid/musicid），不是 QQ 号。
+  const musicId = qqCookieMusicId(cookieHeader);
   let fileMediaMid = String(mediaMid || '').trim();
   let detailMeta = null;
   if (!fileMediaMid) {
@@ -724,9 +734,12 @@ export async function handleQQSongUrl(mid, mediaMid, qualityPreference, cookieHe
   const mediaIds = [];
   if (fileMediaMid) mediaIds.push(fileMediaMid);
   if (songmid && !mediaIds.includes(songmid)) mediaIds.push(songmid);
+  // 文件名必须是两段：prefix + songmid + media_mid + 扩展名。只给 media_mid 时
+  // vkey 可能给 purl，但 CDN 仍会 403；VIP 歌也可能直接回 104003。
+  const filenameFor = (item, mediaId) => item.prefix + songmid + (mediaId || songmid) + item.ext;
   const fileCandidates = mediaIds.flatMap((mediaId) =>
     qualityCandidatesFrom(requestedQuality, QQ_QUALITY_CANDIDATE_TEMPLATES)
-      .map((item) => ({ ...item, mediaId, filename: item.prefix + mediaId + item.ext })),
+      .map((item) => ({ ...item, mediaId, filename: filenameFor(item, mediaId) })),
   );
   const filenames = fileCandidates.map((item) => item.filename);
   const param = {
@@ -750,42 +763,132 @@ export async function handleQQSongUrl(mid, mediaMid, qualityPreference, cookieHe
       : [];
     return { data: response && response.req_0 && response.req_0.data, rows, info: rows.find((item) => item && item.purl) || rows[0] };
   };
-  let json = await qqMusicRequest(vkeyPayload, cookieHeader);
-  let { data, rows: infos, info } = readVkey(json);
-  let purl = info && info.purl;
-  let vkeyShape = 'web';
-  // 与写入同一个教训：QQ 的 musicu 模块在 web 身份下可能拿不到 vkey（purl 为空）。
-  // 现场：8 首 QQ 歌全部 not-playable，而 music_play 本身的 code 是 200 —— 就是 purl 空。
-  // 换成实测可用的 android 身份（设备 + QIMEI + uid/sid 会话）并带上 g_tk 再试一次。
+  // 现场：账号有会员、官方 App 能播，我们这边同一批歌里有的 purl=true、有的每档音质都 104003。
+  // 说明不是版权问题，而是**请求形态**（客户端类型 ct 与凭证种类）不匹配 —— 和当初写红心同一个教训。
+  // 这里按顺序试几种形态，只要拿到 purl 就停；trace 记下哪种生效，报告里能直接看出来。
+  const vkeyRequest = { req_0: { module: 'vkey.GetVkeyServer', method: 'CgiGetVkey', param } };
+  const urlVkeyRequest = {
+    req_0: { module: 'music.vkey.GetVkey', method: 'UrlGetVkey', param: { ...param, uin: musicId || uin, ctx: 0 } },
+  };
+  const vkeyShapes = [
+    { shape: 'ct19', comm, req_0: vkeyRequest.req_0 },
+    { shape: 'ct24', comm: { ...comm, ct: 24 }, req_0: vkeyRequest.req_0 },
+    { shape: 'web-plain', comm: { format: 'json', uin, ct: 24, cv: 0, platform: 'yqq.json' }, req_0: vkeyRequest.req_0 },
+    // 新版播放协议：带会话用 UrlGetVkey；优先于 android 兜底，网页 p_skey 可用时就能拿到 VIP 链接。
+    { shape: 'url-web', comm: musicId ? { ...comm, qq: musicId } : comm, req_0: urlVkeyRequest.req_0 },
+  ];
+  let json = null;
+  let { data, rows: infos, info } = { data: null, rows: [], info: null };
+  let purl = '';
+  let vkeyShape = '';
+  let vkeyAttempts = 0;
+  let lastRestriction = null;
+  const vkeySession = {
+    hasSession: !!(uin && musicKey),
+    hasPlaybackKey: !!(uin && playbackKey),
+    hasWebAuth: qqCookieHasWebAuth(cookieHeader),
+  };
+  for (const candidate of vkeyShapes) {
+    vkeyAttempts += 1;
+    try {
+      const response = await qqMusicRequest({ comm: candidate.comm, req_0: candidate.req_0 || vkeyRequest.req_0 }, cookieHeader);
+      const read = readVkey(response);
+      if (read.info && read.info.purl) {
+        json = response;
+        data = read.data;
+        infos = read.rows;
+        info = read.info;
+        purl = read.info.purl;
+        vkeyShape = candidate.shape;
+        break;
+      }
+      data = read.data;
+      infos = read.rows;
+      info = read.info;
+      lastRestriction = classifyQQPlaybackRestriction(info, vkeySession);
+    } catch (_) {}
+  }
+  // 最后再试一次实测可用的 android 身份（设备 + QIMEI + uid/sid 会话 + g_tk）。
+  // 注意：这不是原生扫码登录，登录仍然只走网页；这里只是用同一份网页 cookie 换一种 vkey 请求形态。
   if (!purl) {
     try {
       const device = await getQQRadioDevice();
       await ensureQQQimei(device);
       await ensureQQAndroidSession(device);
       const { candidates } = qqRadioLoginTypes(cookieHeader);
-      const androidJson = await qqMusicRequest(
-        { comm: buildQQRadioComm(cookieHeader, device, candidates[0]), req_0: vkeyPayload.req_0 },
-        buildQQRadioCookie(cookieHeader),
-        QQ_MUSICU_UA,
-        { gTk: qqGtk(cookieHeader) },
-      );
-      const fallback = readVkey(androidJson);
-      if (fallback.info && fallback.info.purl) {
-        json = androidJson;
+      const androidComm = {
+        ...buildQQRadioComm(cookieHeader, device, candidates[0]),
+        ...(musicKey ? { authst: musicKey } : {}),
+      };
+      for (const request of [vkeyRequest.req_0, urlVkeyRequest.req_0]) {
+        vkeyAttempts += 1;
+        const androidJson = await qqMusicRequest(
+          { comm: androidComm, req_0: request },
+          buildQQRadioCookie(cookieHeader),
+          QQ_MUSICU_UA,
+          { gTk: qqGtk(cookieHeader) },
+        );
+        const fallback = readVkey(androidJson);
+        if (fallback.info && fallback.info.purl) {
+          json = androidJson;
+          data = fallback.data;
+          infos = fallback.rows;
+          info = fallback.info;
+          purl = fallback.info.purl;
+          vkeyShape = request.method === 'UrlGetVkey' ? 'android-url' : 'android';
+          break;
+        }
         data = fallback.data;
         infos = fallback.rows;
         info = fallback.info;
-        purl = fallback.info.purl;
-        vkeyShape = 'android';
+        lastRestriction = classifyQQPlaybackRestriction(info, vkeySession);
       }
     } catch (_) {}
   }
+  // 最后一步：上面几种形态都拿不到 purl 时，说明问题可能不在身份，而在**请求的文件名/音质组合**。
+  // 现场：失败歌的 qqCode=104003 但 rawMessage 为空、rows 有 4~6 行 —— 像是「这些文件不存在」而不是
+  // 「没权限」。所以把全部音质模板（含无损 FLAC / Hi-Res）都塞进去再问一次，逐行看 QQ 怎么回。
+  let rowDetail = '';
+  if (!purl) {
+    try {
+      const allFileCandidates = mediaIds.flatMap((mediaId) =>
+        QQ_QUALITY_CANDIDATE_TEMPLATES.map((item) => ({ ...item, mediaId, filename: filenameFor(item, mediaId) })),
+      );
+      const allParam = { ...param, filename: allFileCandidates.map((item) => item.filename) };
+      const allResponse = await qqMusicRequest(
+        { comm, req_0: { module: 'vkey.GetVkeyServer', method: 'CgiGetVkey', param: allParam } },
+        cookieHeader,
+      );
+      const read = readVkey(allResponse);
+      rowDetail = read.rows
+        .slice(0, 5)
+        .map((row) => `${String(row && row.filename || '').slice(-14)}:${String(row && (row.result ?? row.code ?? ''))}${row && row.purl ? '+url' : ''}`)
+        .join(' ');
+      if (read.info && read.info.purl) {
+        json = allResponse;
+        data = read.data;
+        infos = read.rows;
+        info = read.info;
+        purl = read.info.purl;
+        vkeyShape = 'allqualities';
+      }
+    } catch (_) {}
+  }
+  // 报告留痕：形状 / 是否拿到 purl / 试了几种 / QQ 原文码与说明 / 它自己的分类 / 各文件名的返回码。
   noteLibraryStep('qq', 'song-url:vkey', {
-    shape: vkeyShape,
+    shape: vkeyShape || 'none',
     purl: Boolean(purl),
+    attempts: vkeyAttempts,
     rows: infos.length,
     qqCode: info && (info.result || info.code || info.errtype),
+    rawMessage: String((info && (info.msg || info.tips || info.errmsg || info.message)) || '').slice(0, 60),
+    category: lastRestriction && lastRestriction.category ? lastRestriction.category : '',
+    hasPlaybackKey: vkeySession.hasPlaybackKey,
+    webAuth: vkeySession.hasWebAuth,
+    hasMusicId: Boolean(musicId),
+    mediaMid: fileMediaMid ? fileMediaMid.slice(0, 20) : '(none)',
     filename: info && info.filename,
+    rowDetail: rowDetail.slice(0, 160),
   });
   if (purl) {
     const sip = (data.sip && data.sip[0]) || 'https://ws.stream.qqmusic.qq.com/';
@@ -809,6 +912,7 @@ export async function handleQQSongUrl(mid, mediaMid, qualityPreference, cookieHe
   const restriction = classifyQQPlaybackRestriction(info, {
     hasSession: !!(uin && musicKey),
     hasPlaybackKey: !!(uin && playbackKey),
+    hasWebAuth: qqCookieHasWebAuth(cookieHeader),
   });
   return {
     provider: 'qq',
@@ -2777,4 +2881,213 @@ export async function handleQQAlbumSubscribe(input, cookieHeader) {
     return qqBridgeFailure('album-subscribe', after.code);
   }
   return { code: 0, subscribed };
+}
+
+// ── 探索页（0.7.21 新增）────────────────────────────────────────────────
+// qqExplore.ts 用的这批路由在 .196 的桥里没有，之前整页报「bridge does not implement」。
+// 按 qq-music-api 3.3.3 的 module/method/param（node_modules 里的实现）搬到内置桥：
+// 雷达、相似歌曲、新歌速递、新碟上架、排行榜清单/单榜、歌单分类/分类歌单、电台清单/电台曲目。
+// 推荐内容一律匿名读；电台清单带登录态时会话 cookie 本来就在。
+
+const qqExploreTrackList = data => (
+    Array.isArray(data?.songlist) ? data.songlist
+        : Array.isArray(data?.songs) ? data.songs
+            : Array.isArray(data?.songInfoList) ? data.songInfoList
+                : Array.isArray(data?.track_list) ? data.track_list
+                    : []
+);
+
+const qqExploreToplistCard = entry => {
+    const id = Number(entry?.topId);
+    if (!Number.isSafeInteger(id) || id <= 0) return null;
+    const period = typeof entry?.period === 'string' && entry.period ? entry.period : undefined;
+    return {
+        id,
+        title: String(entry?.title ?? ''),
+        ...(period ? { period } : {}),
+        // 封面字段名各版本不同：全空时卡片会是白图。
+        cover: String(entry?.headPicUrl ?? entry?.frontPicUrl ?? entry?.musichallPicUrl ?? entry?.picUrl ?? entry?.cover ?? entry?.imgurl ?? ''),
+        total: Number(entry?.totalNum) || 0,
+        listenNum: Number(entry?.listenNum) || 0,
+        intro: typeof entry?.intro === 'string' ? entry.intro : '',
+    };
+};
+
+/** 刷歌模式（客户端「雷达」）：一页约 10 首，匿名也读。 */
+export async function handleQQRecommendRadar(page, cookieHeader) {
+    const pageNumber = Math.max(1, Math.min(100, Math.floor(Number(page)) || 1));
+    const result = await qqMusicuCall(
+        'music.recommend.TrackRelationServer', 'GetRadarSong',
+        { Page: pageNumber, ReqType: 0, FavSongs: [], EntranceSongs: [] },
+        cookieHeader,
+    );
+    if (!result.ok) return { code: 0, songs: [], more: false };
+    const entries = Array.isArray(result.data?.VecSongs) ? result.data.VecSongs : [];
+    // 上游把曲目放在 `Track` 里，但不同版本字段名换过（track / TrackInfo / 平铺）；
+    // 只认 `Track.mid` 会在上游换名时把整页刷歌模式缩成 1 首（报告里 songs=1）。
+    const songs = entries.map((entry) => {
+        const track = entry && (entry.Track || entry.track || entry.TrackInfo || entry.track_info || entry);
+        if (!track || typeof track !== 'object') return null;
+        const mid = track.mid || track.songmid || track.songMid || track.songMid;
+        return typeof mid === 'string' && mid ? { ...track, mid } : null;
+    }).filter(Boolean);
+    noteLibraryStep('qq', 'radar:decode', { entries: entries.length, songs: songs.length });
+    return { code: 0, songs, more: result.data?.HasMore === true };
+}
+
+/** 相似歌曲：`songid` 认数字歌曲 id。 */
+export async function handleQQSimilarSongs(id, cookieHeader) {
+    const result = await qqMusicuCall(
+        'music.recommend.TrackRelationServer', 'GetSimilarSongs',
+        { songid: Number(id) || 0 },
+        cookieHeader,
+    );
+    if (!result.ok) return { code: 0, songs: [] };
+    return { code: 0, songs: Array.isArray(result.data?.songs) ? result.data.songs : [] };
+}
+
+/** 电台清单（要登录态）。 */
+export async function handleQQRadioList(cookieHeader) {
+    const uin = qqCookieMusicId(cookieHeader) || qqCookieUin(cookieHeader) || 0;
+    const result = await qqMusicuCall('pf.radiosvr', 'GetRadiolist', { uin: Number(uin) || 0 }, cookieHeader);
+    if (!result.ok) return { code: 0, groups: [] };
+    const groups = Array.isArray(result.data?.radio_list) ? result.data.radio_list : [];
+    return {
+        code: 0,
+        groups: groups.map(group => ({
+            id: String(group?.group_id ?? group?.id ?? ''),
+            title: String(group?.group_name ?? group?.title ?? ''),
+            radios: (Array.isArray(group?.radios) ? group.radios : []).map(radio => ({
+                id: Number(radio?.id ?? radio?.radio_id) || 0,
+                title: String(radio?.title ?? radio?.name ?? radio?.radio_name ?? ''),
+                picurl: String(radio?.pic_url ?? radio?.picurl ?? ''),
+            })).filter(radio => radio.id > 0 && radio.title),
+        })).filter(group => group.id && group.title && group.radios.length > 0),
+    };
+}
+
+/** 一个电台的一批歌（点开电台卡片时读）。 */
+export async function handleQQRadioTracks(id, cookieHeader) {
+    const result = await qqMusicuCall(
+        'pf.radiosvr', 'GetRadiosonglist',
+        { id: Number(id) || 0, firstplay: 0, num: 30 },
+        cookieHeader,
+    );
+    if (!result.ok) return { code: 0, songs: [] };
+    return { code: 0, songs: qqExploreTrackList(result.data) };
+}
+
+/** 新歌速递：type 5 是上游的「最新」。 */
+export async function handleQQRecommendNewSongs(area, cookieHeader) {
+    const result = await qqMusicuCall(
+        'newsong.NewSongServer', 'get_new_song_info',
+        { type: Number(area) || 5 },
+        cookieHeader,
+    );
+    if (!result.ok) return { code: 0, songs: [] };
+    return { code: 0, songs: qqExploreTrackList(result.data) };
+}
+
+/** 新碟上架：地区 1 是华语，暂只取这一区。 */
+export async function handleQQRecommendNewAlbums(offset, limit, cookieHeader) {
+    const size = Math.max(1, Math.min(40, Math.floor(Number(limit)) || 12));
+    const start = Math.max(0, Math.floor(Number(offset)) || 0);
+    const result = await qqMusicuCall(
+        'newalbum.NewAlbumServer', 'get_new_album_info',
+        { area: 1, sin: 0, start, num: size },
+        cookieHeader,
+    );
+    if (!result.ok) return { code: 0, albums: [], more: false };
+    const entries = Array.isArray(result.data?.albums) ? result.data.albums : [];
+    const albums = entries.map(item => {
+        const mid = typeof item?.mid === 'string' ? item.mid : '';
+        if (!mid) return null;
+        return {
+            mid,
+            name: String(item?.name ?? ''),
+            singers: (Array.isArray(item?.singers) ? item.singers : [])
+                .map(singer => ({ mid: String(singer?.mid ?? ''), name: String(singer?.name ?? '') }))
+                .filter(singer => singer.mid),
+            ...(item?.release_time ? { publishDate: String(item.release_time) } : {}),
+            ...(Number.isFinite(Number(item?.ex?.track_nums)) ? { trackCount: Number(item.ex.track_nums) } : {}),
+        };
+    }).filter(Boolean);
+    const total = Number(result.data?.total);
+    return {
+        code: 0,
+        albums,
+        more: Number.isFinite(total) ? start + entries.length < total : false,
+    };
+}
+
+/** 榜单清单（分组，组里是榜卡片）。 */
+export async function handleQQRecommendToplists(cookieHeader) {
+    const result = await qqMusicuCall('musicToplist.ToplistInfoServer', 'GetAll', {}, cookieHeader);
+    if (!result.ok) return { code: 0, groups: [] };
+    const groups = Array.isArray(result.data?.group) ? result.data.group : [];
+    return {
+        code: 0,
+        groups: groups.map(group => ({
+            toplists: (Array.isArray(group?.toplist) ? group.toplist : [])
+                .map(qqExploreToplistCard).filter(Boolean),
+        })).filter(group => group.toplists.length > 0),
+    };
+}
+
+/** 一个榜的一批歌；`period` 传榜单卡片记下的期数，空串是最新一期。 */
+export async function handleQQRecommendToplist(id, offset, limit, period, cookieHeader) {
+    const size = Math.max(1, Math.min(100, Math.floor(Number(limit)) || 12));
+    const start = Math.max(0, Math.floor(Number(offset)) || 0);
+    const result = await qqMusicuCall(
+        'musicToplist.ToplistInfoServer', 'GetDetail',
+        { topid: Number(id) || 0, offset: start, num: size, period: typeof period === 'string' ? period : '' },
+        cookieHeader,
+    );
+    if (!result.ok) return { code: 0, songs: [], more: false };
+    const songs = Array.isArray(result.data?.songInfoList) ? result.data.songInfoList : [];
+    const total = Number(result.data?.data?.totalNum);
+    return {
+        code: 0,
+        songs,
+        ...(Number.isFinite(total) && total >= 0 ? { total } : {}),
+        more: Number.isFinite(total) && total >= 0 ? start + songs.length < total : false,
+    };
+}
+
+/** 歌单分类（热门分组）。 */
+export async function handleQQRecommendCategories() {
+    const result = await qqMusicuCall('music.web_category_svr', 'get_hot_category', {}, '');
+    if (!result.ok) return { code: 0, groups: [] };
+    const groups = Array.isArray(result.data?.category) ? result.data.category : [];
+    return {
+        code: 0,
+        groups: groups.map(group => ({
+            id: Number(group?.group_id) || 0,
+            name: String(group?.group_name ?? ''),
+            categories: (Array.isArray(group?.items) ? group.items : [])
+                .map(item => ({ id: Number(item?.item_id) || 0, name: String(item?.item_name ?? '') }))
+                .filter(category => category.id > 0 && category.name),
+        })).filter(group => group.id > 0 && group.categories.length > 0),
+    };
+}
+
+/** 一个分类下的一页歌单。 */
+export async function handleQQRecommendCategoryPlaylists(id, page, limit, cookieHeader) {
+    const size = Math.max(1, Math.min(40, Math.floor(Number(limit)) || 12));
+    const pageNumber = Math.max(1, Math.floor(Number(page)) || 1);
+    const result = await qqMusicuCall(
+        'music.playlist.PlayListCategory', 'get_category_content',
+        { caller: '0', category_id: Number(id) || 0, page: pageNumber - 1, size, use_page: 1 },
+        cookieHeader,
+    );
+    if (!result.ok) return { code: 0, playlists: [], more: false };
+    const content = result.data?.content ?? {};
+    const entries = Array.isArray(content.v_item) ? content.v_item : [];
+    const playlists = entries.map(entry => qqRecommendPlaylistRow(entry)).filter(Boolean);
+    const total = Number(content.total_cnt);
+    return {
+        code: 0,
+        playlists,
+        more: Number.isFinite(total) && pageNumber * size < total,
+    };
 }

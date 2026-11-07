@@ -64,7 +64,7 @@ export const loadTvSongAudio = async (
         retry: { isCurrent },
     });
     if (!isCurrent()) throw new DOMException('Playback request superseded', 'AbortError');
-    if (result.kind !== 'ok') throw new TvPlaybackSourceError(result.failure.reason);
+    if (result.kind !== 'ok') throw new TvPlaybackSourceError(result.failure.case);
 
     return {
         audioSrc: result.audioSrc,

@@ -6,7 +6,7 @@ import { UserGuideFeatureCard } from './UserGuideFeatureCard';
 import { UserGuideTipCard } from './UserGuideTipCard';
 import { PLAYER_PAGE_SHORTCUTS, type GuidePage, type UserGuideShortcut } from './userGuideContent';
 import { NewFeaturesIntro } from './NewFeaturesIntro';
-import foliaIcon from '../../../assets/folia-icon.png';
+import foliaIcon from '../../../build/icon.png';
 
 // src/components/modal/UserGuidePageContent.tsx
 
@@ -59,10 +59,7 @@ export const UserGuidePageContent: React.FC<UserGuidePageContentProps> = ({
     if (page === 1) {
         return (
             <>
-                <NewFeaturesIntro 
-                    isDaylight={isDaylight} 
-                    classes={{ textPrimary, textSecondary, tipCardBg, iconTileBg, cardBg }} 
-                />
+                <NewFeaturesIntro />
             </>
         );
     }

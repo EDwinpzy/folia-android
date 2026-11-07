@@ -29,6 +29,10 @@ export const useTvLibrary = (account: TvAccountModel): TvLibraryModel => {
     const likedRequestRef = useRef(0);
     const userId = account.activeAccount?.user?.id ?? null;
     const providerId = account.activeProviderId;
+    const likedCollection = useMemo(
+        () => account.activeAccount?.collections.find(collection => collection.isLiked === true) ?? null,
+        [account.activeAccount?.collections],
+    );
 
     useEffect(() => {
         let cancelled = false;
@@ -62,7 +66,18 @@ export const useTvLibrary = (account: TvAccountModel): TvLibraryModel => {
 
         setIsLoadingLiked(true);
         setLikedError(null);
-        void omni.getProviderLikedSongs(providerId, userId)
+        void (async () => {
+            if (likedCollection) {
+                const page = await omni.getCollectionTracks(likedCollection, {
+                    limit: Math.max(1, likedCollection.trackCount ?? 500),
+                    offset: 0,
+                });
+                return page.items;
+            }
+            const answer = await omni.getProviderLikedSongIds(providerId, userId);
+            const details = await omni.getSongDetails(providerId, answer.ids);
+            return details.flatMap(detail => detail.status === 'found' ? [detail.song] : []);
+        })()
             .then(songs => {
                 if (likedRequestRef.current === requestId) setLikedSongs(songs);
             })
@@ -75,7 +90,7 @@ export const useTvLibrary = (account: TvAccountModel): TvLibraryModel => {
             .finally(() => {
                 if (likedRequestRef.current === requestId) setIsLoadingLiked(false);
             });
-    }, [providerId, userId]);
+    }, [likedCollection, providerId, userId]);
 
     const playlists = useMemo(
         () => (account.activeAccount?.collections ?? []).filter(collection => (

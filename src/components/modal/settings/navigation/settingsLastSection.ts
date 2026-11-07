@@ -15,6 +15,8 @@ export const SETTINGS_LAST_SECTION_STORAGE_KEY = 'folia_settings_last_section';
 export const DEFAULT_SETTINGS_SECTION: SettingsSectionId = 'appearance';
 
 /** The slice of Storage this module touches; tests pass a plain object. */
+import { IS_ANDROID_WEBVIEW } from '../../../../utils/platform';
+
 export type SettingsSectionStorage = Pick<Storage, 'getItem' | 'setItem'>;
 
 export interface SettingsSectionAvailability {
@@ -25,13 +27,15 @@ export interface SettingsSectionAvailability {
 export const getAvailableSettingsSectionIds = ({ isElectron }: SettingsSectionAvailability): SettingsSectionId[] => (
     SETTINGS_NAV_GROUP_SPECS
         .flatMap(group => group.sections)
-        .filter(section => !section.electronOnly || isElectron)
+        .filter(section => !section.electronOnly
+            || isElectron
+            || (section.id === 'mods' && IS_ANDROID_WEBVIEW))
         .map(section => section.id)
 );
 
 /**
  * Which options-tab section a subview target lands on. `lyricFilter` and `globalLyricOffset` are
- * secondary panels opened from the playback section, so closing them falls back to it. The overlay
+ * secondary panels opened from the lyrics section, so closing them falls back to it. The overlay
  * workbenches (`visualizer`, `themePark`) have no section of their own and return null.
  */
 export const sectionForSettingsSubview = (subview: SettingsSubviewId | null | undefined): SettingsSectionId | null => {
@@ -39,7 +43,7 @@ export const sectionForSettingsSubview = (subview: SettingsSubviewId | null | un
         return null;
     }
     if (subview === 'globalLyricOffset' || subview === 'lyricFilter') {
-        return 'playback';
+        return 'lyrics';
     }
     const isSection = SETTINGS_NAV_GROUP_SPECS.some(group => group.sections.some(section => section.id === subview));
     return isSection ? (subview as SettingsSectionId) : null;

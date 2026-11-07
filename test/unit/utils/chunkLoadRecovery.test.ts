@@ -27,6 +27,9 @@ describe('chunkLoadRecovery', () => {
             'Failed to fetch dynamically imported module: https://localhost/assets/BravaisStage-DrcJCWT6.js',
         ))).toBe(true);
         expect(isChunkLoadError(new Error('loading chunk 12 failed'))).toBe(true);
+        expect(isChunkLoadError(new Error(
+            'Unable to preload CSS for https://localhost/assets/TvPlayer-old.css',
+        ))).toBe(true);
         expect(isChunkLoadError(new Error('ordinary render error'))).toBe(false);
     });
 

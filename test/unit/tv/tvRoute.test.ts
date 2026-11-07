@@ -1,7 +1,12 @@
 // test/unit/tv/tvRoute.test.ts
 
 import { describe, expect, it } from 'vitest';
-import { resolveTvBackRoute, resolveTvLayer, TV_HOME_ROUTE } from '../../../src/tv/model/tvRoute';
+import {
+    resolveTvBackRoute,
+    resolveTvEffectsRoute,
+    resolveTvLayer,
+    TV_HOME_ROUTE,
+} from '../../../src/tv/model/tvRoute';
 
 describe('TV route layers', () => {
     it('gives every overlay its own focus layer', () => {
@@ -36,5 +41,21 @@ describe('TV route layers', () => {
             page: 'home',
             overlay: 'exit',
         });
+    });
+
+    it('focuses the effects panel only when the player controls still own the foreground', () => {
+        expect(resolveTvEffectsRoute({ page: 'player', overlay: 'controls' })).toEqual({
+            page: 'player',
+            overlay: 'effects',
+        });
+        expect(resolveTvEffectsRoute({ page: 'player', overlay: 'queue' })).toEqual({
+            page: 'player',
+            overlay: 'queue',
+        });
+        expect(resolveTvEffectsRoute({ page: 'player', overlay: null })).toEqual({
+            page: 'player',
+            overlay: null,
+        });
+        expect(resolveTvEffectsRoute(TV_HOME_ROUTE)).toEqual(TV_HOME_ROUTE);
     });
 });
