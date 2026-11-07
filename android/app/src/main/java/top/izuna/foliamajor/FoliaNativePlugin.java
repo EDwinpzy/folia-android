@@ -10,6 +10,7 @@ import android.content.Intent;
 import android.database.Cursor;
 import android.os.Build;
 import android.os.PowerManager;
+import android.os.SystemClock;
 import android.provider.DocumentsContract;
 import android.provider.OpenableColumns;
 import android.provider.MediaStore;
@@ -76,6 +77,10 @@ import okhttp3.ResponseBody;
 )
 public class FoliaNativePlugin extends Plugin {
     private static volatile FoliaNativePlugin instance;
+    private static final Object VOICE_PLAY_LOCK = new Object();
+    private static final long VOICE_PLAY_REQUEST_TTL_MS = 120_000L;
+    private static String pendingVoicePlayQuery;
+    private static long pendingVoicePlayAt;
     private static volatile String playbackArtworkCover = "";
     private static volatile String playbackArtworkStatus = "none";
     private static volatile String playbackArtworkDetail = "";
@@ -106,6 +111,47 @@ public class FoliaNativePlugin extends Plugin {
         JSObject payload = new JSObject();
         payload.put("action", action);
         plugin.getActivity().runOnUiThread(() -> plugin.notifyListeners("mediaAction", payload));
+    }
+
+    /**
+     * Queues a song request from the voice helper. Pending state survives the gap between
+     * Activity creation and the TV bundle registering its listener; the event is only a wake-up
+     * signal, and the WebView consumes the query through {@link #consumeVoicePlayRequest}.
+     */
+    static void offerVoicePlayRequest(String query) {
+        String normalized = VoicePlayIntents.normalize(query);
+        if (normalized == null) return;
+        synchronized (VOICE_PLAY_LOCK) {
+            pendingVoicePlayQuery = normalized;
+            pendingVoicePlayAt = SystemClock.elapsedRealtime();
+        }
+
+        FoliaNativePlugin plugin = instance;
+        if (plugin == null) return;
+        Activity activity = plugin.getActivity();
+        if (activity == null) return;
+        activity.runOnUiThread(() -> {
+            if (plugin.hasListeners("voicePlayRequest")) {
+                plugin.notifyListeners("voicePlayRequest", new JSObject());
+            }
+        });
+    }
+
+    /** Returns and clears the latest request so a reload cannot replay an old voice command. */
+    @PluginMethod
+    public void consumeVoicePlayRequest(PluginCall call) {
+        String query = null;
+        synchronized (VOICE_PLAY_LOCK) {
+            if (pendingVoicePlayQuery != null
+                && SystemClock.elapsedRealtime() - pendingVoicePlayAt <= VOICE_PLAY_REQUEST_TTL_MS) {
+                query = pendingVoicePlayQuery;
+            }
+            pendingVoicePlayQuery = null;
+            pendingVoicePlayAt = 0L;
+        }
+        JSObject result = new JSObject();
+        if (query != null) result.put("query", query);
+        call.resolve(result);
     }
 
     /** True when the WebView handled Back; false lets the activity fall back to normal exit. */

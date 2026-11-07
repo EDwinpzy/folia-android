@@ -19,6 +19,7 @@ import { useTvNativePlayback } from './hooks/useTvNativePlayback';
 import { useTvPerformanceProfile } from './hooks/useTvPerformanceProfile';
 import { useTvPlayer } from './hooks/useTvPlayer';
 import { useTvRemote } from './hooks/useTvRemote';
+import { useTvVoicePlay } from './hooks/useTvVoicePlay';
 import { clickFocusedTvElement } from './input/focusDom';
 import { isTvDirection, type TvRemoteAction } from './input/tvKeys';
 import {
@@ -299,6 +300,8 @@ export const TvApp = () => {
         setCollection(null);
         openPlayer();
     }, [openPlayer, player]);
+
+    useTvVoicePlay({ onPlayTracks: playTracks });
 
     const openCollection = useCallback((nextCollection: ProviderCollection) => {
         setCollection(nextCollection);
