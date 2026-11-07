@@ -1558,7 +1558,13 @@ export const kugouProvider: OnlineMusicProvider = {
             const rawItems = listOf(response);
             const playlistItems = rawItems
                 .filter(item => getKugouUserCollectionType(item) === 'playlist')
-                .map(item => ({ raw: item, collection: normalizeCollection(item, 'playlist', isKugouOwnedPlaylist(item)) }))
+                .map(item => ({
+                    raw: item,
+                    collection: {
+                        ...normalizeCollection(item, 'playlist', isKugouOwnedPlaylist(item)),
+                        ...(isKugouLikedPlaylist(item) ? { isLiked: true } : {}),
+                    },
+                }))
                 .filter(({ collection }) => collection.id !== '');
             const items = await Promise.all(playlistItems.map(async ({ raw, collection }) => {
                 if (collection.coverUrl || !isKugouOwnedPlaylist(raw)) return collection;

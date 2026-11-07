@@ -1097,6 +1097,30 @@ describe('kugouProvider', () => {
         });
     });
 
+    it('marks the built-in liked playlist so home rows can read its songs directly', async () => {
+        requestMock.mockResolvedValueOnce({
+            data: {
+                info: [{
+                    type: 0,
+                    source: 1,
+                    listid: 2,
+                    name: '我喜欢',
+                    count: 41,
+                    global_collection_id: 'collection_3_user_2_0',
+                }],
+            },
+        });
+
+        const page = await kugouProvider.library?.getUserPlaylists?.('user', 50, 0);
+
+        expect(page?.items[0]).toMatchObject({
+            id: 'collection_3_user_2_0',
+            name: '我喜欢',
+            isLiked: true,
+            trackCount: 41,
+        });
+    });
+
     it('separates mixed user playlists from favorite albums', async () => {
         const response = {
             data: {
