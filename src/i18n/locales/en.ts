@@ -175,6 +175,28 @@ export default {
       "trackCount_one": "{{count}} track",
       "trackCount_other": "{{count}} tracks"
     },
+    "car": {
+      "title": "Car mode",
+      "subtitle": "Steering wheel, touch and large screens",
+      "nowPlaying": "Now playing",
+      "noSong": "Nothing playing yet",
+      "noSongHint": "Play starts from your local library",
+      "scan": "Scan music",
+      "scanning": "Scanning…",
+      "import": "Import music",
+      "importing": "Importing…",
+      "defaultPlayer": "Default player",
+      "openingSettings": "Opening settings…",
+      "defaultHint": "The entry varies by vehicle: choose Music in Settings → Default apps → Music.",
+      "voiceHint": "Vehicle voice can play, pause and skip tracks; song search depends on the head unit exposing media search.",
+      "scanDone": "Scanned {{count}} songs",
+      "importDone": "Library refreshed · {{count}} songs",
+      "empty": "No songs found to import",
+      "settingsOpened": "System settings opened. Choose the default music app.",
+      "actionFailed": "Action failed. Try again.",
+      "unavailable": "This action is not available on this device",
+      "preparing": "Preparing the track…"
+    },
     "effects": {
       "open": "Effects",
       "title": "Lyrics and background",

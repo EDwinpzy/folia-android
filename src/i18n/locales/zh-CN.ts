@@ -175,6 +175,28 @@ export default {
       "trackCount_one": "{{count}} 首",
       "trackCount_other": "{{count}} 首"
     },
+    "car": {
+      "title": "车载音乐",
+      "subtitle": "方向盘、触控与大屏",
+      "nowPlaying": "当前播放",
+      "noSong": "还没有播放歌曲",
+      "noSongHint": "播放键会从本地曲库开始",
+      "scan": "扫描音乐",
+      "scanning": "正在扫描…",
+      "import": "导入音乐",
+      "importing": "正在导入…",
+      "defaultPlayer": "默认播放器",
+      "openingSettings": "正在打开设置…",
+      "defaultHint": "不同车机入口不同：请在“设置 → 默认应用 → 音乐”中选择 Music。",
+      "voiceHint": "车机语音可控制播放、暂停和上下曲；点歌取决于车机是否开放媒体搜索接口。",
+      "scanDone": "已扫描 {{count}} 首歌曲",
+      "importDone": "曲库已更新，共 {{count}} 首",
+      "empty": "没有找到可导入的歌曲",
+      "settingsOpened": "已打开系统设置，请选择默认音乐应用",
+      "actionFailed": "操作失败，请重试",
+      "unavailable": "当前设备不支持此操作",
+      "preparing": "正在准备歌曲…"
+    },
     "effects": {
       "open": "动效",
       "title": "歌词与背景",

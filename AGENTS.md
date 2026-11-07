@@ -4,9 +4,13 @@
 
 - **Primary Android product**: root Vite/React renderer plus the `android/` Capacitor host.
 - **TV entry**: `tv.html` and `src/tv/`; do not treat the regular mobile renderer as the TV surface.
-- **Development**: `npm run dev` for the main app; `npm run dev:tv` for the TV entry.
+- **Android car entry**: `car.html` and `src/car/`, hosted by `CarActivity` and selected by `EntryActivity` on automotive devices, including BYD/Fangchengbao DiLink head units that do not advertise AAOS; do not treat the TV surface or the regular mobile renderer as the car surface.
+- **Development**: `npm run dev` for the main app; `npm run dev:tv` for TV; `npm run dev:car` for Android car.
 - **Checks**: `npm run typecheck` and `npm run test:unit`; use `npm run codemap:check` when changing module structure.
-- **Android debug build**: `npm run build:android:debug`; for TV use `npm run build:android:tv:debug`.
+- **Android debug build**: `npm run build:android:debug`; for TV use `npm run build:android:tv:debug`; for car use `npm run build:android:car:debug`. Set `ANDROID_HOME`, `ANDROID_SDK_ROOT` and a JDK 21 `JAVA_HOME` before invoking Gradle.
+- **Generated/ignored**: `dist/`, `node_modules/`, `android/.gradle/`, `android/build/`, `android/app/build/`, `android/app/src/main/assets/public/`, `android/local.properties`, APK/AAB and signing material.
+- **Release/signing gate**: the car debug build is not a release artifact. Release signing requires the project keystore plus a full real-device/OEM media integration validation; do not publish an unsigned or emulator-only build.
+- **Do not modify directly**: upstream `main` in the primary checkout, generated web assets, and local SDK/signing files. Work in the task worktree and branch.
 - **UI changes**: run the relevant `npm run test:component` or `npm run test:ui` suite; device/emulator testing is required for D-pad, focus, and TV runtime behavior.
 - **Search skip**: `dist/`, `node_modules/`, `android/build/`, `android/.gradle/`, and generated assets.
 - **Read only the relevant project skill**: the skills below are loaded by trigger, not all at once.

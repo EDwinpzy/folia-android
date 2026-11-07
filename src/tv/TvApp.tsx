@@ -4,6 +4,8 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { applyKeepScreenOn, readStoredKeepScreenOn } from '../services/androidKeepScreenOn';
 import { useNativeBackButton } from '../hooks/useNativeBackButton';
 import { canRetryLogin } from '../library/core/account/accountRules';
+import { useCarInitialFocus } from '../car/useCarInitialFocus';
+import { TvCarToolbar } from '../car/TvCarToolbar';
 import type { SongResult } from '../types';
 import type { ProviderCollection } from '../types/onlineMusic';
 import { TvChunkFailureOverlay } from './components/TvChunkFailureOverlay';
@@ -67,10 +69,13 @@ const RESET_FOCUS_MEMORY_LAYERS = [
     'failure',
 ] as const;
 
-export const TvApp = () => {
+export const TvApp = ({ variant = 'tv' }: { variant?: 'tv' | 'car' } = {}) => {
+    const isCar = variant === 'car';
     const player = useTvPlayer();
-    const nativePlayback = useTvNativePlayback(player);
+    const nativePlayback = useTvNativePlayback(player, isCar ? 'car' : 'tv');
     const performanceProfile = useTvPerformanceProfile();
+    const constrained = isCar || performanceProfile.tier === 'constrained';
+    useCarInitialFocus(isCar);
     const account = useTvAccount({ onProviderSwitch: player.pause });
     const library = useTvLibrary(account);
     const trackSkipGestureRef = useRef(createTvTrackSkipGesture());
@@ -176,8 +181,12 @@ export const TvApp = () => {
         active: !chunkFailure && route.page === 'player' && route.overlay === 'controls',
         onHide: hideControls,
     });
+    const revealPlayerChromeFromTouch = useCallback(() => {
+        revealPlayerChrome();
+        touchControls();
+    }, [revealPlayerChrome, touchControls]);
     const defaultFocus = useMemo(() => ({
-        home: 'home-hero',
+        home: isCar ? 'car-play' : 'home-hero',
         controls: 'controls-play',
         effects: `effects-lyrics-${player.visualizerMode}`,
         queue: player.currentIndex >= 0
@@ -204,6 +213,7 @@ export const TvApp = () => {
         account.activeProviderId,
         account.login,
         account.pendingSwitch,
+        isCar,
         player.currentIndex,
         player.queue[0]?.id,
         player.visualizerMode,
@@ -404,7 +414,7 @@ export const TvApp = () => {
         openPlayer();
     }, [openPlayer, player]);
 
-    useTvVoicePlay({ onPlayTracks: playTracks });
+    useTvVoicePlay({ onPlayTracks: playTracks, onResume: activateHero });
 
     const openCollection = useCallback((nextCollection: ProviderCollection) => {
         setCollection(nextCollection);
@@ -414,9 +424,10 @@ export const TvApp = () => {
     return (
         <div
             className={`tv-app${route.page === 'player' ? ' is-player' : ''}${
-                performanceProfile.tier === 'constrained' ? ' is-constrained' : ''
-            }`}
+                constrained ? ' is-constrained' : ''
+            }${isCar ? ' is-car' : ''}`}
             data-tv-performance-tier={performanceProfile.tier}
+            data-tv-variant={variant}
         >
             <audio
                 ref={player.audioRef}
@@ -439,6 +450,14 @@ export const TvApp = () => {
                         onOpenSearch={openSearch}
                         onPlayTracks={playTracks}
                         onOpenCollection={openCollection}
+                        carConsole={isCar ? (
+                            <TvCarToolbar
+                                player={player}
+                                refreshLocalSongs={library.refreshLocalSongs}
+                                onActivateHero={activateHero}
+                                onOpenPlayer={openPlayer}
+                            />
+                        ) : undefined}
                         inert={route.overlay !== null}
                     />
                 ) : (
@@ -446,9 +465,10 @@ export const TvApp = () => {
                         <TvPlayer
                             player={player}
                             controlsOpen={route.overlay === 'controls' || route.overlay === 'queue'}
-                            constrained={performanceProfile.tier === 'constrained'}
+                            constrained={constrained}
                             onOpenQueue={() => setRoute(current => ({ ...current, overlay: 'queue' }))}
                             onOpenEffects={openEffects}
+                            onRevealControls={revealPlayerChromeFromTouch}
                             inert={route.overlay !== null && route.overlay !== 'controls'}
                         />
                     </Suspense>

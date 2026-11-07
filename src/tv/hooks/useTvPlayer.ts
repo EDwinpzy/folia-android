@@ -96,6 +96,7 @@ export const useTvPlayer = (): TvPlayerModel => {
         previous: playback.previous,
         skipPrevious: playback.skipPrevious,
         seekBy: playback.seekBy,
+        seekTo: playback.seekTo,
         setVisualizerMode: playback.setVisualizerMode,
         setBackgroundMode: playback.setBackgroundMode,
     };

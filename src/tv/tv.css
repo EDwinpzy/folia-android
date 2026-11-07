@@ -91,6 +91,10 @@ img {
 .tv-app,
 .tv-page {
     position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
     inset: 0;
 }
 
@@ -126,6 +130,10 @@ img {
 .tv-home-page::before {
     content: "";
     position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
     inset: 0;
     pointer-events: none;
     opacity: 0.18;
@@ -476,6 +484,10 @@ img {
     content: "";
     position: absolute;
     z-index: 2;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
     inset: 0;
     border-radius: inherit;
     box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
@@ -576,6 +588,10 @@ img {
 
 .tv-backdrop {
     position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
     inset: 0;
     overflow: hidden;
     pointer-events: none;
@@ -587,6 +603,10 @@ img {
 
 .tv-backdrop-scrim {
     position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
     inset: 0;
     pointer-events: none;
     background:
@@ -743,6 +763,10 @@ img {
 
 .tv-lyric-token-lit {
     position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
     inset: 0;
     display: block;
     color: #fff;
@@ -845,6 +869,10 @@ img {
 
 .tv-control-track i {
     position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
     inset: 0;
     display: block;
     transform-origin: left center;
@@ -947,6 +975,10 @@ img {
 .tv-overlay {
     position: fixed;
     z-index: 100;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
     inset: 0;
     display: flex;
     align-items: center;
@@ -3430,4 +3462,362 @@ img {
     .tv-queue-panel {
         width: min(390px, 72vw);
     }
+}
+
+/* Automotive surface: larger hit targets, less decoration and a driving-oriented quick console. */
+
+.tv-app.is-car {
+    --tv-safe-x: clamp(28px, 4vw, 72px);
+    --tv-safe-y: clamp(14px, 3vh, 34px);
+    --tv-card-w: clamp(212px, 15vw, 260px);
+    --tv-radius: 22px;
+    background: var(--tv-bg);
+}
+
+.tv-app.is-car .tv-home-page {
+    background:
+        linear-gradient(180deg, rgba(6, 6, 12, 0.34), rgba(6, 6, 12, 0.9) 88%),
+        radial-gradient(ellipse at 10% -12%, rgba(139, 92, 246, 0.14), transparent 40%);
+}
+
+.tv-app.is-car .tv-home-page::before,
+.tv-app.is-car .tv-hero::before,
+.tv-app.is-car .tv-hero-orbit {
+    display: none;
+}
+
+.tv-app.is-car [data-tv-focusable="true"] {
+    transition: none;
+}
+
+.tv-app.is-car [data-tv-focusable="true"]:focus {
+    outline: 4px solid #c4b5fd;
+    outline-offset: -6px;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22);
+}
+
+.tv-app.is-car .tv-header {
+    min-height: clamp(92px, 12vh, 118px);
+}
+
+.tv-app.is-car .tv-header .tv-hero {
+    border-color: rgba(255, 255, 255, 0.18);
+    background:
+        linear-gradient(112deg, rgba(35, 29, 55, 0.98), rgba(12, 15, 25, 0.94) 64%),
+        var(--tv-bg-raised);
+}
+
+.tv-app.is-car .tv-header .tv-hero-title {
+    font-size: clamp(28px, min(2.2vw, 5.1vh), 48px);
+}
+
+.tv-app.is-car .tv-hero-action {
+    min-height: 48px;
+    padding-inline: 20px;
+}
+
+.tv-app.is-car .tv-home-content {
+    gap: clamp(18px, 2.4vh, 28px);
+    scroll-padding-block: 18px;
+}
+
+.tv-car-console {
+    width: 100%;
+    display: grid;
+    gap: clamp(12px, 1.7vh, 18px);
+    padding: clamp(16px, 1.5vw, 22px);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 24px;
+    background: linear-gradient(120deg, rgba(29, 26, 43, 0.96), rgba(13, 16, 25, 0.94));
+}
+
+.tv-car-console-heading {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.tv-car-console-heading > span:last-child {
+    min-width: 0;
+    display: grid;
+    gap: 3px;
+}
+
+.tv-car-console-heading strong {
+    font-size: clamp(18px, 1.1vw, 22px);
+    font-weight: 650;
+}
+
+.tv-car-console-heading small {
+    color: var(--tv-text-muted);
+    font-size: 13px;
+}
+
+.tv-car-console-mark {
+    width: 42px;
+    height: 42px;
+    display: grid;
+    place-items: center;
+    flex: 0 0 42px;
+    border-radius: 13px;
+    background: var(--tv-accent-soft);
+    color: #d9ccff;
+}
+
+.tv-car-console-body {
+    display: grid;
+    grid-template-columns: minmax(280px, 1.2fr) auto minmax(330px, 1fr);
+    align-items: stretch;
+    gap: clamp(12px, 1.2vw, 18px);
+}
+
+.tv-car-now-playing {
+    min-width: 0;
+    min-height: 108px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.045);
+    text-align: left;
+}
+
+.tv-car-art {
+    width: clamp(66px, 5.4vw, 82px);
+    height: clamp(66px, 5.4vw, 82px);
+    display: grid;
+    place-items: center;
+    flex: 0 0 auto;
+    overflow: hidden;
+    border-radius: 14px;
+    background: linear-gradient(145deg, #2d2742, #151521);
+    color: var(--tv-accent);
+}
+
+.tv-car-art img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.tv-car-now-copy {
+    min-width: 0;
+    display: grid;
+    gap: 4px;
+}
+
+.tv-car-now-copy small {
+    color: var(--tv-accent);
+    font-size: 12px;
+    font-weight: 650;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.tv-car-now-copy strong,
+.tv-car-now-copy span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tv-car-now-copy strong {
+    color: #fff;
+    font-size: clamp(20px, 1.35vw, 27px);
+    font-weight: 640;
+}
+
+.tv-car-now-copy span {
+    color: var(--tv-text-muted);
+    font-size: clamp(14px, 0.85vw, 17px);
+}
+
+.tv-car-transport {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+}
+
+.tv-car-transport button {
+    width: 58px;
+    height: 58px;
+    display: grid;
+    place-items: center;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.07);
+    color: var(--tv-text);
+}
+
+.tv-car-transport button.is-primary {
+    width: 72px;
+    height: 72px;
+    border-color: rgba(167, 139, 250, 0.58);
+    background: linear-gradient(145deg, #9f7df8, #7650df);
+    color: #fff;
+}
+
+.tv-car-actions {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    align-items: stretch;
+    gap: 8px;
+}
+
+.tv-car-action {
+    min-width: 0;
+    min-height: 58px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 10px 12px;
+    border: 1px solid rgba(255, 255, 255, 0.11);
+    border-radius: 15px;
+    background: rgba(255, 255, 255, 0.045);
+    color: var(--tv-text);
+    font-size: clamp(13px, 0.78vw, 15px);
+    font-weight: 600;
+    text-align: center;
+}
+
+.tv-car-action span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.tv-car-action[aria-disabled="true"] {
+    color: var(--tv-text-muted);
+}
+
+.tv-car-console-footer {
+    min-width: 0;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+    padding-top: 2px;
+}
+
+.tv-car-hints {
+    min-width: 0;
+    display: grid;
+    gap: 4px;
+}
+
+.tv-car-default-hint {
+    min-width: 0;
+    color: var(--tv-text-muted);
+    font-size: clamp(12px, 0.74vw, 14px);
+    line-height: 1.45;
+}
+
+.tv-car-voice-hint {
+    min-width: 0;
+    color: #b9a7e9;
+    font-size: clamp(12px, 0.72vw, 14px);
+    line-height: 1.4;
+}
+
+.tv-car-action-status {
+    flex: 0 0 auto;
+    color: #d8caff;
+    font-size: clamp(12px, 0.74vw, 14px);
+}
+
+.tv-app.is-car .tv-media-card {
+    min-height: calc(var(--tv-card-w) + 64px);
+}
+
+@media (max-width: 1120px) {
+    .tv-car-console-body {
+        grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    .tv-car-actions {
+        grid-column: 1 / -1;
+    }
+}
+
+@media (max-width: 760px) {
+    .tv-car-console-body {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .tv-car-transport,
+    .tv-car-actions {
+        grid-column: 1;
+    }
+
+    .tv-car-console-footer {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 6px;
+    }
+}
+
+/*
+ * Chromium 83 does not support flex gap. carLegacyWebViewPolyfills adds this class only when a
+ * runtime probe confirms that gap is ignored in a flex container.
+ */
+html.legacy-flex-gap .tv-home-content > * + * {
+    margin-top: clamp(26px, 3.5vh, 38px);
+}
+
+html.legacy-flex-gap .tv-app.is-car .tv-home-content > * + * {
+    margin-top: clamp(18px, 2.4vh, 28px);
+}
+
+html.legacy-flex-gap .tv-row-heading > * + * {
+    margin-left: 18px;
+}
+
+html.legacy-flex-gap .tv-row-scroll > * + * {
+    margin-left: clamp(18px, 1.25vw, 24px);
+}
+
+html.legacy-flex-gap .tv-media-copy > * + * {
+    margin-top: 5px;
+}
+
+html.legacy-flex-gap .tv-hero-eyebrow > * + * {
+    margin-left: 10px;
+}
+
+html.legacy-flex-gap .tv-header .tv-hero-eyebrow > * + * {
+    margin-left: 6px;
+}
+
+html.legacy-flex-gap .tv-hero-action > * + * {
+    margin-left: 9px;
+}
+
+html.legacy-flex-gap .tv-header .tv-hero-action > * + * {
+    margin-left: 6px;
+}
+
+html.legacy-flex-gap .tv-search-entry > * + *,
+html.legacy-flex-gap .tv-car-console-heading > * + * {
+    margin-left: 11px;
+}
+
+html.legacy-flex-gap .tv-car-console-heading > * + * {
+    margin-left: 12px;
+}
+
+html.legacy-flex-gap .tv-car-now-playing > * + * {
+    margin-left: 16px;
+}
+
+html.legacy-flex-gap .tv-car-transport > * + * {
+    margin-left: 10px;
+}
+
+html.legacy-flex-gap .tv-car-action > * + * {
+    margin-left: 8px;
 }

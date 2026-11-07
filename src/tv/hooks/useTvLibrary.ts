@@ -1,6 +1,6 @@
 // src/tv/hooks/useTvLibrary.ts
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getLocalSongs } from '../../services/db';
 import { omni } from '../../services/onlineMusic/omni';
 import { buildLocalQueue } from '../../services/playbackAdapters';
@@ -18,6 +18,13 @@ export type TvLibraryModel = {
     isLoadingLocal: boolean;
     isLoadingLiked: boolean;
     likedError: string | null;
+    refreshLocalSongs: () => Promise<number>;
+};
+
+const readLocalQueue = async (): Promise<SongResult[]> => {
+    const songs = await getLocalSongs();
+    const sorted = [...songs].sort((left, right) => right.addedAt - left.addedAt);
+    return buildLocalQueue(sorted);
 };
 
 export const useTvLibrary = (account: TvAccountModel): TvLibraryModel => {
@@ -34,14 +41,28 @@ export const useTvLibrary = (account: TvAccountModel): TvLibraryModel => {
         [account.activeAccount?.collections],
     );
 
+    const refreshLocalSongs = useCallback(async (): Promise<number> => {
+        setIsLoadingLocal(true);
+        try {
+            const nextLocalSongs = await readLocalQueue();
+            setLocalSongs(nextLocalSongs);
+            return nextLocalSongs.length;
+        } catch (error) {
+            console.warn('[TV Library] Local library unavailable', error);
+            setLocalSongs([]);
+            throw error;
+        } finally {
+            setIsLoadingLocal(false);
+        }
+    }, []);
+
     useEffect(() => {
         let cancelled = false;
         setIsLoadingLocal(true);
-        void getLocalSongs()
+        void readLocalQueue()
             .then(songs => {
                 if (cancelled) return;
-                const sorted = [...songs].sort((left, right) => right.addedAt - left.addedAt);
-                setLocalSongs(buildLocalQueue(sorted));
+                setLocalSongs(songs);
             })
             .catch(error => {
                 console.warn('[TV Library] Local library unavailable', error);
@@ -112,6 +133,7 @@ export const useTvLibrary = (account: TvAccountModel): TvLibraryModel => {
         isLoadingLocal,
         isLoadingLiked,
         likedError,
+        refreshLocalSongs,
     };
 };
 

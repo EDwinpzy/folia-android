@@ -21,9 +21,11 @@ describe('TV native playback bridge', () => {
     it('builds a TV-owned native session snapshot', () => {
         const payload = buildTvNativePlaybackPayload({
             song,
+            queue: [song],
             status: 'playing',
             positionSeconds: 12.4,
             durationSeconds: 215,
+            launchTarget: 'car',
         });
 
         expect(payload).toEqual(expect.objectContaining({
@@ -35,9 +37,16 @@ describe('TV native playback bridge', () => {
             playing: true,
             position: 12400,
             duration: 215000,
-            launchTarget: 'tv',
+            launchTarget: 'car',
             requestNotificationPermission: false,
         }));
+        expect(payload?.queue).toEqual([expect.objectContaining({
+            index: 0,
+            title: '夜航星',
+            artist: '测试歌手',
+            songKey: 'online:netease:42',
+            duration: 215000,
+        })]);
     });
 
     it('does not publish or restart the service without a song', () => {
@@ -73,6 +82,7 @@ describe('TV native playback bridge', () => {
         expect(resolveTvNativeMediaAction('next')).toBe('next');
         expect(resolveTvNativeMediaAction('previous')).toBe('previous');
         expect(resolveTvNativeMediaAction('stop')).toBe('stop');
+        expect(resolveTvNativeMediaAction('seek')).toBe('seek');
         expect(resolveTvNativeMediaAction('seekto')).toBeNull();
         expect(resolveTvNativeMediaAction(undefined)).toBeNull();
     });

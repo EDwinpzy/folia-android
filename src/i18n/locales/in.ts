@@ -2,6 +2,28 @@
 
 export default {
   "tv": {
+    "car": {
+      "title": "Mode mobil",
+      "subtitle": "Setir, sentuh, dan layar besar",
+      "nowPlaying": "Sedang diputar",
+      "noSong": "Belum ada lagu yang diputar",
+      "noSongHint": "Tombol putar memulai dari pustaka lokal",
+      "scan": "Pindai musik",
+      "scanning": "Memindai…",
+      "import": "Impor musik",
+      "importing": "Mengimpor…",
+      "defaultPlayer": "Pemutar default",
+      "openingSettings": "Membuka pengaturan…",
+      "defaultHint": "Letaknya berbeda tiap kendaraan: pilih Music di Pengaturan → Aplikasi default → Musik.",
+      "voiceHint": "Suara kendaraan dapat memutar, menjeda, dan melewati lagu; pencarian lagu bergantung pada dukungan pencarian media head unit.",
+      "scanDone": "{{count}} lagu dipindai",
+      "importDone": "Pustaka diperbarui · {{count}} lagu",
+      "empty": "Tidak ada lagu untuk diimpor",
+      "settingsOpened": "Pengaturan sistem terbuka. Pilih aplikasi musik default.",
+      "actionFailed": "Tindakan gagal. Coba lagi.",
+      "unavailable": "Tindakan ini tidak tersedia di perangkat ini",
+      "preparing": "Menyiapkan lagu…"
+    },
     "failure": {
       "title": "Gagal memuat sumber pemutar",
       "hint": "Kembali ke beranda lalu buka aplikasi lagi. Tekan Kembali untuk ke beranda.",

@@ -25,7 +25,10 @@ export type TvNativePlaybackController = {
  * Position is only pushed on real state changes (play/pause/seek/track), which avoids restarting
  * a foreground service from the background every second on Android 12+.
  */
-export const useTvNativePlayback = (player: TvPlayerModel): TvNativePlaybackController => {
+export const useTvNativePlayback = (
+    player: TvPlayerModel,
+    launchTarget: 'tv' | 'car' = 'tv',
+): TvNativePlaybackController => {
     const [plugin, setPlugin] = useState<TvNativePlaybackPlugin | null>(null);
     const [foregroundRevision, setForegroundRevision] = useState(0);
     const lastIdentityRef = useRef('');
@@ -35,14 +38,17 @@ export const useTvNativePlayback = (player: TvPlayerModel): TvNativePlaybackCont
     const {
         audioRef,
         currentSong,
+        queue,
         status,
         duration,
         positionRevision,
         currentTime,
+        playQueue,
         resumeCurrent,
         pause,
         next,
         previous,
+        seekTo,
     } = player;
 
     useEffect(() => {
@@ -73,9 +79,11 @@ export const useTvNativePlayback = (player: TvPlayerModel): TvNativePlaybackCont
             : currentTime.get();
         const payload = buildTvNativePlaybackPayload({
             song: currentSong,
+            queue,
             status,
             positionSeconds,
             durationSeconds: duration,
+            launchTarget: launchTarget === 'car' ? 'car' : 'tv',
         });
 
         if (!payload) {
@@ -98,8 +106,10 @@ export const useTvNativePlayback = (player: TvPlayerModel): TvNativePlaybackCont
         currentTime,
         duration,
         foregroundRevision,
+        launchTarget,
         plugin,
         positionRevision,
+        queue,
         status,
     ]);
 
@@ -107,7 +117,7 @@ export const useTvNativePlayback = (player: TvPlayerModel): TvNativePlaybackCont
         if (!plugin) return undefined;
         let disposed = false;
         let listenerHandle: { remove: () => Promise<void> } | { remove: () => void } | null = null;
-        const registered = plugin.addListener('mediaAction', ({ action }) => {
+        const registered = plugin.addListener('mediaAction', ({ action, position }) => {
             if (disposed) return;
             const resolved = resolveTvNativeMediaAction(action);
             if (resolved === 'play') resumeCurrent();
@@ -115,6 +125,9 @@ export const useTvNativePlayback = (player: TvPlayerModel): TvNativePlaybackCont
             else if (resolved === 'next') next();
             else if (resolved === 'previous') previous();
             else if (resolved === 'stop') pause();
+            else if (resolved === 'seek' && typeof position === 'number') {
+                seekTo(position / 1000);
+            }
         });
 
         Promise.resolve(registered)
@@ -131,7 +144,55 @@ export const useTvNativePlayback = (player: TvPlayerModel): TvNativePlaybackCont
             disposed = true;
             if (listenerHandle) void listenerHandle.remove();
         };
-    }, [next, pause, plugin, previous, resumeCurrent]);
+    }, [next, pause, plugin, previous, resumeCurrent, seekTo]);
+
+    useEffect(() => {
+        if (!plugin?.consumeQueuePlayRequest) return undefined;
+        let disposed = false;
+        let listenerHandle: { remove: () => Promise<void> } | { remove: () => void } | null = null;
+        let consuming = false;
+
+        const consume = async () => {
+            if (disposed || consuming || queue.length === 0) return;
+            consuming = true;
+            try {
+                const request = await plugin.consumeQueuePlayRequest?.();
+                const index = request?.index;
+                if (
+                    !disposed
+                    && typeof index === 'number'
+                    && Number.isInteger(index)
+                    && index >= 0
+                    && index < queue.length
+                ) {
+                    playQueue(queue, index);
+                }
+            } catch {
+                // A stale browser selection is harmless; the user can choose again.
+            } finally {
+                consuming = false;
+            }
+        };
+
+        const registered = plugin.addListener('mediaPlayRequest', () => {
+            if (!disposed) void consume();
+        });
+        Promise.resolve(registered)
+            .then(handle => {
+                if (disposed) {
+                    void handle.remove();
+                    return;
+                }
+                listenerHandle = handle;
+                void consume();
+            })
+            .catch(() => undefined);
+
+        return () => {
+            disposed = true;
+            if (listenerHandle) void listenerHandle.remove();
+        };
+    }, [playQueue, plugin, queue]);
 
     const moveToBackground = useCallback(async (): Promise<boolean> => {
         if (!plugin?.moveTaskToBack || actionLockRef.current) return false;

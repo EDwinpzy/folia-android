@@ -35,6 +35,8 @@ public class MainActivity extends BridgeActivity {
     private static final long RENDERER_RECOVERY_WINDOW_MS = 60_000L;
     private static final String WEBVIEW_UPDATE_PREFS = "folia_webview_update";
     private static final String WEBVIEW_UPDATE_KEY = "last_cleared_update_time";
+    private static final String VOICE_REQUEST_HANDLED =
+        "top.izuna.foliamajor.extra.VOICE_REQUEST_HANDLED";
     private int rendererRecoveries = 0;
     private long lastUserLeaveRecordAt = 0L;
     private long lastTrimMemoryRecordAt = 0L;
@@ -56,9 +58,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(FoliaFnMusicPlugin.class);
         registerPlugin(top.izuna.foliamajor.coloros.FoliaColorOsLyricsPlugin.class);
         Intent launchIntent = getIntent();
-        String voicePlayQuery = VoicePlayIntents.readQuery(launchIntent);
-        VoicePlayIntents.clear(launchIntent);
-        if (voicePlayQuery != null) FoliaNativePlugin.offerVoicePlayRequest(voicePlayQuery);
+        handleVoiceIntent(launchIntent);
         super.onCreate(savedInstanceState);
         attachYtmSignInLauncher();
         CrashDiagnostics.recordText(
@@ -106,9 +106,22 @@ public class MainActivity extends BridgeActivity {
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
-        String voicePlayQuery = VoicePlayIntents.readQuery(intent);
+        handleVoiceIntent(intent);
+    }
+
+    private void handleVoiceIntent(Intent intent) {
+        if (intent == null || intent.getBooleanExtra(VOICE_REQUEST_HANDLED, false)) return;
+        VoicePlayIntents.Request request = VoicePlayIntents.readRequest(intent);
+        if (request == null) return;
+        // BridgeActivity.load() replays getIntent() through onNewIntent after onCreate. Mark the
+        // intent before clearing its extras so that cold starts queue one request, not a resume.
+        intent.putExtra(VOICE_REQUEST_HANDLED, true);
         VoicePlayIntents.clear(intent);
-        if (voicePlayQuery != null) FoliaNativePlugin.offerVoicePlayRequest(voicePlayQuery);
+        if (request.query == null) {
+            FoliaNativePlugin.offerVoiceResumeRequest();
+        } else {
+            FoliaNativePlugin.offerVoicePlayRequest(request.query);
+        }
     }
 
     /**

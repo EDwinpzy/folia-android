@@ -14,6 +14,7 @@ import android.os.SystemClock;
 import android.provider.DocumentsContract;
 import android.provider.OpenableColumns;
 import android.provider.MediaStore;
+import android.provider.Settings;
 import android.webkit.CookieManager;
 import android.webkit.WebView;
 import android.view.WindowManager;
@@ -80,9 +81,13 @@ import okhttp3.ResponseBody;
 public class FoliaNativePlugin extends Plugin {
     private static volatile FoliaNativePlugin instance;
     private static final Object VOICE_PLAY_LOCK = new Object();
+    private static final Object QUEUE_PLAY_LOCK = new Object();
     private static final long VOICE_PLAY_REQUEST_TTL_MS = 120_000L;
     private static String pendingVoicePlayQuery;
+    private static boolean pendingVoiceResumeRequest;
     private static long pendingVoicePlayAt;
+    private static int pendingQueuePlayIndex = -1;
+    private static long pendingQueuePlayAt;
     private static volatile String playbackArtworkCover = "";
     private static volatile String playbackArtworkStatus = "none";
     private static volatile String playbackArtworkDetail = "";
@@ -108,11 +113,18 @@ public class FoliaNativePlugin extends Plugin {
     }
 
     static void emitMediaAction(String action) {
+        emitMediaAction(action, Long.MIN_VALUE);
+    }
+
+    static void emitMediaAction(String action, long position) {
         FoliaNativePlugin plugin = instance;
         if (plugin == null) return;
+        Activity activity = plugin.getActivity();
+        if (activity == null) return;
         JSObject payload = new JSObject();
         payload.put("action", action);
-        plugin.getActivity().runOnUiThread(() -> plugin.notifyListeners("mediaAction", payload));
+        if (position >= 0L) payload.put("position", position);
+        activity.runOnUiThread(() -> plugin.notifyListeners("mediaAction", payload));
     }
 
     /**
@@ -125,9 +137,23 @@ public class FoliaNativePlugin extends Plugin {
         if (normalized == null) return;
         synchronized (VOICE_PLAY_LOCK) {
             pendingVoicePlayQuery = normalized;
+            pendingVoiceResumeRequest = false;
             pendingVoicePlayAt = SystemClock.elapsedRealtime();
         }
+        notifyVoicePlayListener();
+    }
 
+    /** Queues a generic "play music" request when the assistant did not provide a song name. */
+    static void offerVoiceResumeRequest() {
+        synchronized (VOICE_PLAY_LOCK) {
+            pendingVoicePlayQuery = null;
+            pendingVoiceResumeRequest = true;
+            pendingVoicePlayAt = SystemClock.elapsedRealtime();
+        }
+        notifyVoicePlayListener();
+    }
+
+    private static void notifyVoicePlayListener() {
         FoliaNativePlugin plugin = instance;
         if (plugin == null) return;
         Activity activity = plugin.getActivity();
@@ -139,20 +165,62 @@ public class FoliaNativePlugin extends Plugin {
         });
     }
 
+    /** Queues a concrete playback-queue selection made by a system media browser. */
+    static void offerQueuePlayRequest(int index) {
+        if (index < 0) return;
+        synchronized (QUEUE_PLAY_LOCK) {
+            pendingQueuePlayIndex = index;
+            pendingQueuePlayAt = SystemClock.elapsedRealtime();
+        }
+
+        FoliaNativePlugin plugin = instance;
+        if (plugin == null) return;
+        Activity activity = plugin.getActivity();
+        if (activity == null) return;
+        activity.runOnUiThread(() -> {
+            if (!plugin.hasListeners("mediaPlayRequest")) return;
+            JSObject payload = new JSObject();
+            payload.put("index", index);
+            plugin.notifyListeners("mediaPlayRequest", payload);
+        });
+    }
+
     /** Returns and clears the latest request so a reload cannot replay an old voice command. */
     @PluginMethod
     public void consumeVoicePlayRequest(PluginCall call) {
         String query = null;
+        boolean resume = false;
         synchronized (VOICE_PLAY_LOCK) {
-            if (pendingVoicePlayQuery != null
-                && SystemClock.elapsedRealtime() - pendingVoicePlayAt <= VOICE_PLAY_REQUEST_TTL_MS) {
+            boolean fresh = pendingVoicePlayAt > 0L
+                && SystemClock.elapsedRealtime() - pendingVoicePlayAt <= VOICE_PLAY_REQUEST_TTL_MS;
+            if (fresh) {
                 query = pendingVoicePlayQuery;
+                resume = pendingVoiceResumeRequest;
             }
             pendingVoicePlayQuery = null;
+            pendingVoiceResumeRequest = false;
             pendingVoicePlayAt = 0L;
         }
         JSObject result = new JSObject();
         if (query != null) result.put("query", query);
+        else if (resume) result.put("action", "resume");
+        call.resolve(result);
+    }
+
+    /** Returns and clears a queued media-browser selection, mirroring the voice request contract. */
+    @PluginMethod
+    public void consumeQueuePlayRequest(PluginCall call) {
+        int index = -1;
+        synchronized (QUEUE_PLAY_LOCK) {
+            if (pendingQueuePlayIndex >= 0
+                && SystemClock.elapsedRealtime() - pendingQueuePlayAt <= VOICE_PLAY_REQUEST_TTL_MS) {
+                index = pendingQueuePlayIndex;
+            }
+            pendingQueuePlayIndex = -1;
+            pendingQueuePlayAt = 0L;
+        }
+        JSObject result = new JSObject();
+        if (index >= 0) result.put("index", index);
         call.resolve(result);
     }
 
@@ -647,6 +715,62 @@ public class FoliaNativePlugin extends Plugin {
     }
 
     /**
+     * Android has no API that silently makes an app the default music player. Open the closest
+     * system setting page and let the user finish the choice in the car's own UI.
+     */
+    @PluginMethod
+    public void openDefaultMusicSettings(PluginCall call) {
+        Activity activity = getActivity();
+        if (activity == null) {
+            call.reject("Activity is not available");
+            return;
+        }
+
+        JSObject result = new JSObject();
+        Intent defaultApps = new Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        if (tryStartSettingsIntent(activity, defaultApps)) {
+            result.put("opened", true);
+            result.put("mode", "default-apps");
+            call.resolve(result);
+            return;
+        }
+
+        Intent appDetails = new Intent(
+            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+            Uri.parse("package:" + getContext().getPackageName())
+        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        if (tryStartSettingsIntent(activity, appDetails)) {
+            result.put("opened", true);
+            result.put("mode", "app-details");
+            call.resolve(result);
+            return;
+        }
+
+        Intent settings = new Intent(Settings.ACTION_SETTINGS)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        if (tryStartSettingsIntent(activity, settings)) {
+            result.put("opened", true);
+            result.put("mode", "settings");
+            call.resolve(result);
+            return;
+        }
+
+        result.put("opened", false);
+        result.put("mode", "none");
+        call.resolve(result);
+    }
+
+    private boolean tryStartSettingsIntent(Activity activity, Intent intent) {
+        try {
+            activity.startActivity(intent);
+            return true;
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+    }
+
+    /**
      * 「导出诊断数据」：把报告写进缓存目录的 txt，再用 FileProvider 拉起系统分享面板。
      *
      * 报告正文由 WebView 侧生成后原样传入，这里只负责落盘和分享。文件名做白名单清洗，
@@ -1054,6 +1178,12 @@ public class FoliaNativePlugin extends Plugin {
         intent.putExtra("coverUrl", call.getString("coverUrl", ""));
         intent.putExtra("songKey", call.getString("songKey", ""));
         intent.putExtra("launchTarget", call.getString("launchTarget", "phone"));
+        String queueJson = call.getString("queue");
+        if (queueJson == null) {
+            JSArray queueArray = call.getArray("queue");
+            queueJson = queueArray == null ? "[]" : queueArray.toString();
+        }
+        intent.putExtra("queue", queueJson);
         intent.putExtra("playing", Boolean.TRUE.equals(call.getBoolean("playing", false)));
         Double position = call.getDouble("position");
         Double duration = call.getDouble("duration");

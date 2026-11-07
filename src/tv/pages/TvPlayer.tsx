@@ -22,6 +22,7 @@ export const TvPlayer = ({
     constrained,
     onOpenQueue,
     onOpenEffects,
+    onRevealControls,
     inert,
 }: {
     player: TvPlayerModel;
@@ -29,6 +30,7 @@ export const TvPlayer = ({
     constrained: boolean;
     onOpenQueue: () => void;
     onOpenEffects: () => void;
+    onRevealControls: () => void;
     inert: boolean;
 }) => {
     const { t } = useTranslation();
@@ -63,6 +65,7 @@ export const TvPlayer = ({
             data-tv-layer="player"
             data-tv-player-chrome={controlsOpen ? 'visible' : 'hidden'}
             className="tv-page tv-player-page"
+            onPointerDown={onRevealControls}
             inert={inert || undefined}
         >
             <TvBackdrop

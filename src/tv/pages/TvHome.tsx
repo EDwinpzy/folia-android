@@ -1,6 +1,6 @@
 // src/tv/pages/TvHome.tsx
 
-import { useCallback } from 'react';
+import { useCallback, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { SongResult } from '../../types';
 import type { ProviderCollection } from '../../types/onlineMusic';
@@ -24,6 +24,7 @@ export const TvHome = ({
     onOpenSearch,
     onPlayTracks,
     onOpenCollection,
+    carConsole,
     inert,
 }: {
     account: TvAccountModel;
@@ -34,6 +35,7 @@ export const TvHome = ({
     onOpenSearch: () => void;
     onPlayTracks: (songs: SongResult[], startIndex: number) => void;
     onOpenCollection: (collection: ProviderCollection) => void;
+    carConsole?: ReactNode;
     inert: boolean;
 }) => {
     const { t } = useTranslation();
@@ -85,6 +87,7 @@ export const TvHome = ({
                 />
             </TvHeader>
             <main className="tv-home-content" data-tv-focus-container="home-body">
+                {carConsole}
                 <TvMediaRow
                     title={t('tv.home.liked')}
                     focusGroup="home-liked"

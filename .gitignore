@@ -109,3 +109,14 @@ public/nebbia-strokes.json
 android/app/src/main/assets/models/
 
 %SystemDrive%/
+
+# Android generated outputs and local signing/device configuration
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/keystore.properties
+*.jks
+*.keystore
+*.apk
+*.aab

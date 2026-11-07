@@ -18,6 +18,7 @@
   "scripts": {
     "dev": "vite",
     "dev:tv": "vite --open /tv.html",
+    "dev:car": "vite --open /car.html",
     "dev:probe": "vite --open /dev-probe.html",
     "build": "npm run build:vercel-api && vite build",
     "build:vercel-api": "tsc -p api-ts/tsconfig.json",
@@ -25,6 +26,7 @@
     "build:capacitor:tv": "npm run build:capacitor",
     "cap:sync:android:tv": "npm run build:capacitor:tv && cap sync android",
     "build:android:tv:debug": "npm run cap:sync:android:tv && cd android && gradlew.bat assembleDebug",
+    "build:android:car:debug": "npm run cap:sync:android:car && cd android && gradlew.bat assembleDebug",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "codemap": "node dev/mcp/ts-code-map/codemap.mjs",
@@ -68,7 +70,9 @@
     "manual:ai-probe": "node test/manual/ai_probe.mjs",
     "verify:android": "node dev/verify-android-bundle.mjs",
     "build:capacitor": "cross-env FOLIA_BUILD_TARGET=capacitor VITE_NETEASE_API_BASE=extension VITE_KUGOU_API_BASE=extension VITE_QQ_API_BASE=extension vite build",
+    "build:capacitor:car": "cross-env FOLIA_FLATTEN_CASCADE_LAYERS=1 npm run build:capacitor",
     "cap:sync:android": "npm run build:capacitor && cap sync android",
+    "cap:sync:android:car": "npm run build:capacitor:car && cap sync android",
     "cap:open:android": "cap open android",
     "cap:run:android": "npm run build:capacitor && cap run android",
     "build:android:debug": "npm run cap:sync:android && cd android && gradlew.bat assembleDebug"
