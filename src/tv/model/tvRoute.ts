@@ -15,6 +15,13 @@ export const resolveTvLayer = (route: TvRoute): TvLayerId => {
     return route.page === 'player' ? 'player' : 'home';
 };
 
+/** 特效面板只能从播放器控制栏打开；分包晚到不能覆盖用户已经切到的其他层。 */
+export const resolveTvEffectsRoute = (route: TvRoute): TvRoute => (
+    route.page === 'player' && route.overlay === 'controls'
+        ? { ...route, overlay: 'effects' }
+        : route
+);
+
 /**
  * Returns the route one Back press should reveal. The TV home root opens the leave overlay so the
  * listener explicitly chooses background playback or a full exit; it never falls through to

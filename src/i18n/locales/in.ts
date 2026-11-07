@@ -1,6 +1,13 @@
 
 
 export default {
+  "tv": {
+    "failure": {
+      "title": "Gagal memuat sumber pemutar",
+      "hint": "Kembali ke beranda lalu buka aplikasi lagi. Tekan Kembali untuk ke beranda.",
+      "home": "Ke beranda"
+    }
+  },
   "scratchpad": {
     "title": "Buku catatan",
     "count_one": "{{count}} lagu",

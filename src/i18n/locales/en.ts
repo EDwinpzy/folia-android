@@ -181,6 +181,11 @@ export default {
       "lyrics": "Lyric effects",
       "background": "Background effects"
     },
+    "failure": {
+      "title": "Could not load player resources",
+      "hint": "Return home and reopen the app. Press Back to return home.",
+      "home": "Back home"
+    },
     "search": {
       "open": "Search songs, artists, albums",
       "title": "Search",

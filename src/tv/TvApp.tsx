@@ -1,14 +1,15 @@
 // src/tv/TvApp.tsx
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { applyKeepScreenOn, readStoredKeepScreenOn } from '../services/androidKeepScreenOn';
 import { useNativeBackButton } from '../hooks/useNativeBackButton';
 import { canRetryLogin } from '../library/core/account/accountRules';
 import type { SongResult } from '../types';
 import type { ProviderCollection } from '../types/onlineMusic';
+import { TvChunkFailureOverlay } from './components/TvChunkFailureOverlay';
+import { TvChunkLoadBoundary } from './components/TvChunkLoadBoundary';
 import { TvCollectionOverlay } from './components/TvCollectionOverlay';
 import { TvExitOverlay } from './components/TvExitOverlay';
-import { TvEffectsOverlay } from './components/TvEffectsOverlay';
 import { TvLoginOverlay } from './components/TvLoginOverlay';
 import { TvQueueOverlay } from './components/TvQueueOverlay';
 import { TvSearchOverlay } from './components/TvSearchOverlay';
@@ -28,11 +29,43 @@ import {
     TV_TRACK_SKIP_INTERVAL_MS,
 } from './input/tvTrackSkipGesture';
 import { shouldRevealTvPlayerChrome } from './model/tvPlayerChrome';
-import { resolveTvBackRoute, resolveTvLayer, TV_HOME_ROUTE, type TvRoute } from './model/tvRoute';
+import {
+    resolveTvBackRoute,
+    resolveTvEffectsRoute,
+    resolveTvLayer,
+    TV_HOME_ROUTE,
+    type TvRoute,
+} from './model/tvRoute';
 import { TvHome } from './pages/TvHome';
-import { TvPlayer } from './pages/TvPlayer';
 
-const RESET_FOCUS_MEMORY_LAYERS = ['exit', 'login', 'collection', 'search', 'queue', 'effects'] as const;
+let playerImportPromise: Promise<typeof import('./pages/TvPlayer')> | null = null;
+let effectsImportPromise: Promise<typeof import('./components/TvEffectsOverlay')> | null = null;
+
+// Reuse the in-flight import so a user action cannot start a second Vite preload that skips
+// the CSS dependency still being loaded by the idle prefetch.
+const loadTvPlayer = () => {
+    playerImportPromise ??= import('./pages/TvPlayer');
+    return playerImportPromise;
+};
+const loadTvEffectsOverlay = () => {
+    effectsImportPromise ??= import('./components/TvEffectsOverlay');
+    return effectsImportPromise;
+};
+
+const TvPlayer = lazy(() => loadTvPlayer().then(module => ({ default: module.TvPlayer })));
+const TvEffectsOverlay = lazy(() => (
+    loadTvEffectsOverlay().then(module => ({ default: module.TvEffectsOverlay }))
+));
+
+const RESET_FOCUS_MEMORY_LAYERS = [
+    'exit',
+    'login',
+    'collection',
+    'search',
+    'queue',
+    'effects',
+    'failure',
+] as const;
 
 export const TvApp = () => {
     const player = useTvPlayer();
@@ -45,10 +78,56 @@ export const TvApp = () => {
     const [route, setRoute] = useState<TvRoute>(TV_HOME_ROUTE);
     const [collection, setCollection] = useState<ProviderCollection | null>(null);
     const [loginError, setLoginError] = useState<string | null>(null);
+    const [chunkFailure, setChunkFailure] = useState(false);
     const loginCompletionBaselineRef = useRef<number | null>(null);
-    const activeLayer = resolveTvLayer(route);
+    const playerChunkPrefetchFailedRef = useRef(false);
+    const effectsChunkPrefetchFailedRef = useRef(false);
+    const routeRef = useRef(route);
+    routeRef.current = route;
+    const activeLayer = chunkFailure ? 'failure' : resolveTvLayer(route);
+
+    const reportChunkFailure = useCallback((error: unknown) => {
+        console.warn('[TV App] Chunk load failed', error);
+        if (routeRef.current.page === 'player') setChunkFailure(true);
+    }, []);
+
+    const dismissChunkFailure = useCallback(() => {
+        setChunkFailure(false);
+        setRoute(TV_HOME_ROUTE);
+    }, []);
 
     useNativeBackButton();
+
+    useEffect(() => {
+        const idleWindow = window as Window & {
+            requestIdleCallback?: (
+                callback: () => void,
+                options?: { timeout: number },
+            ) => number;
+            cancelIdleCallback?: (handle: number) => void;
+        };
+        let idleHandle: number | null = null;
+        let timeoutHandle: number | null = null;
+        const preload = () => {
+            void loadTvPlayer().catch(error => {
+                console.warn('[TV App] Player chunk preload failed', error);
+                playerChunkPrefetchFailedRef.current = true;
+            });
+            void loadTvEffectsOverlay().catch(error => {
+                console.warn('[TV App] Effects chunk preload failed', error);
+                effectsChunkPrefetchFailedRef.current = true;
+            });
+        };
+        if (typeof idleWindow.requestIdleCallback === 'function') {
+            idleHandle = idleWindow.requestIdleCallback(preload, { timeout: 3500 });
+        } else {
+            timeoutHandle = window.setTimeout(preload, 1200);
+        }
+        return () => {
+            if (idleHandle !== null) idleWindow.cancelIdleCallback?.(idleHandle);
+            if (timeoutHandle !== null) window.clearTimeout(timeoutHandle);
+        };
+    }, []);
 
     const closeAccount = useCallback(() => {
         if (account.pendingSwitch) account.cancelSwitch(account.pendingSwitch.request.id);
@@ -94,7 +173,7 @@ export const TvApp = () => {
 
     const hideControls = useCallback(() => closeControls(), [closeControls]);
     const touchControls = useTvControlsAutoHide({
-        active: route.page === 'player' && route.overlay === 'controls',
+        active: !chunkFailure && route.page === 'player' && route.overlay === 'controls',
         onHide: hideControls,
     });
     const defaultFocus = useMemo(() => ({
@@ -109,6 +188,7 @@ export const TvApp = () => {
         collection: 'collection-play-all',
         search: 'search-input',
         exit: 'exit-background',
+        failure: 'failure-home',
         login: account.pendingSwitch
             ? 'login-switch-confirm'
             : account.login?.methods[0]
@@ -156,7 +236,18 @@ export const TvApp = () => {
         if (action === 'back') {
             cancelPendingChromeReveal();
             trackSkipGestureRef.current.clear();
+            if (chunkFailure) {
+                setChunkFailure(false);
+                setRoute(TV_HOME_ROUTE);
+                return true;
+            }
             return goBack();
+        }
+
+        if (chunkFailure) {
+            if (action === 'ok') return clickFocusedTvElement();
+            if (isTvDirection(action)) return moveFocus(action);
+            return true;
         }
 
         if (route.page === 'player' && !route.overlay) {
@@ -204,6 +295,7 @@ export const TvApp = () => {
         return false;
     }, [
         cancelPendingChromeReveal,
+        chunkFailure,
         goBack,
         player,
         revealPlayerChrome,
@@ -215,7 +307,7 @@ export const TvApp = () => {
     useTvRemote({
         onAction: handleAction,
         onHandledKey: () => {
-            if (route.overlay === 'controls') touchControls();
+            if (!chunkFailure && route.overlay === 'controls') touchControls();
         },
     });
 
@@ -251,14 +343,24 @@ export const TvApp = () => {
     }, []);
 
     const openPlayer = useCallback(() => {
+        if (playerChunkPrefetchFailedRef.current) {
+            setChunkFailure(true);
+            return;
+        }
         setRoute(current => ({ ...current, page: 'player', overlay: null }));
     }, []);
 
     const openEffects = useCallback(() => {
-        setRoute(current => (
-            current.page === 'player' ? { ...current, overlay: 'effects' } : current
-        ));
-    }, []);
+        if (effectsChunkPrefetchFailedRef.current) {
+            setChunkFailure(true);
+            return;
+        }
+        void loadTvEffectsOverlay()
+            .then(() => {
+                setRoute(resolveTvEffectsRoute);
+            })
+            .catch(reportChunkFailure);
+    }, [reportChunkFailure]);
 
     const leaveInBackground = useCallback(() => {
         setRoute(current => (
@@ -323,73 +425,83 @@ export const TvApp = () => {
                 playsInline
                 crossOrigin="anonymous"
             />
-            {route.page === 'home' ? (
-                <TvHome
-                    account={account}
-                    library={library}
-                    player={player}
-                    onActivateHero={activateHero}
-                    onOpenAccount={openAccount}
-                    onOpenSearch={openSearch}
-                    onPlayTracks={playTracks}
-                    onOpenCollection={openCollection}
-                    inert={route.overlay !== null}
-                />
-            ) : (
-                <TvPlayer
-                    player={player}
-                    controlsOpen={route.overlay === 'controls' || route.overlay === 'queue'}
-                    constrained={performanceProfile.tier === 'constrained'}
-                    onOpenQueue={() => setRoute(current => ({ ...current, overlay: 'queue' }))}
-                    onOpenEffects={openEffects}
-                    inert={route.overlay !== null && route.overlay !== 'controls'}
-                />
-            )}
-            {route.overlay === 'queue' && (
-                <TvQueueOverlay
-                    queue={player.queue}
-                    currentIndex={player.currentIndex}
-                    onPlay={index => {
-                        player.playQueue(player.queue, index);
-                        setRoute(current => ({ ...current, overlay: 'controls' }));
-                    }}
-                />
-            )}
-            {route.overlay === 'effects' && (
-                <TvEffectsOverlay
-                    visualizerMode={player.visualizerMode}
-                    backgroundMode={player.backgroundMode}
-                    onVisualizerModeChange={player.setVisualizerMode}
-                    onBackgroundModeChange={player.setBackgroundMode}
-                />
-            )}
-            {route.overlay === 'collection' && collection && (
-                <TvCollectionOverlay
-                    collection={collection}
-                    onPlayTracks={playTracks}
-                />
-            )}
-            {route.overlay === 'search' && (
-                <TvSearchOverlay
-                    onPlayTracks={playTracks}
-                />
-            )}
-            {route.overlay === 'login' && (
-                <TvLoginOverlay
-                    account={account}
-                    startError={loginError}
-                    onSwitchConfirmed={closeAccount}
-                />
-            )}
-            {route.overlay === 'exit' && (
-                <TvExitOverlay
-                    isPlaying={player.status === 'playing'}
-                    canBackground={nativePlayback.canBackground}
-                    canExit={nativePlayback.canExit}
-                    onBackground={leaveInBackground}
-                    onExit={exitTvApp}
-                />
-            )}
+            <TvChunkLoadBoundary
+                key={route.page}
+                onChunkError={reportChunkFailure}
+            >
+                {route.page === 'home' ? (
+                    <TvHome
+                        account={account}
+                        library={library}
+                        player={player}
+                        onActivateHero={activateHero}
+                        onOpenAccount={openAccount}
+                        onOpenSearch={openSearch}
+                        onPlayTracks={playTracks}
+                        onOpenCollection={openCollection}
+                        inert={route.overlay !== null}
+                    />
+                ) : (
+                    <Suspense fallback={<div className="tv-page tv-player-page" aria-busy="true" />}>
+                        <TvPlayer
+                            player={player}
+                            controlsOpen={route.overlay === 'controls' || route.overlay === 'queue'}
+                            constrained={performanceProfile.tier === 'constrained'}
+                            onOpenQueue={() => setRoute(current => ({ ...current, overlay: 'queue' }))}
+                            onOpenEffects={openEffects}
+                            inert={route.overlay !== null && route.overlay !== 'controls'}
+                        />
+                    </Suspense>
+                )}
+                {route.overlay === 'queue' && (
+                    <TvQueueOverlay
+                        queue={player.queue}
+                        currentIndex={player.currentIndex}
+                        onPlay={index => {
+                            player.playQueue(player.queue, index);
+                            setRoute(current => ({ ...current, overlay: 'controls' }));
+                        }}
+                    />
+                )}
+                {route.overlay === 'effects' && (
+                    <Suspense fallback={null}>
+                        <TvEffectsOverlay
+                            visualizerMode={player.visualizerMode}
+                            backgroundMode={player.backgroundMode}
+                            onVisualizerModeChange={player.setVisualizerMode}
+                            onBackgroundModeChange={player.setBackgroundMode}
+                        />
+                    </Suspense>
+                )}
+                {route.overlay === 'collection' && collection && (
+                    <TvCollectionOverlay
+                        collection={collection}
+                        onPlayTracks={playTracks}
+                    />
+                )}
+                {route.overlay === 'search' && (
+                    <TvSearchOverlay
+                        onPlayTracks={playTracks}
+                    />
+                )}
+                {route.overlay === 'login' && (
+                    <TvLoginOverlay
+                        account={account}
+                        startError={loginError}
+                        onSwitchConfirmed={closeAccount}
+                    />
+                )}
+                {route.overlay === 'exit' && (
+                    <TvExitOverlay
+                        isPlaying={player.status === 'playing'}
+                        canBackground={nativePlayback.canBackground}
+                        canExit={nativePlayback.canExit}
+                        onBackground={leaveInBackground}
+                        onExit={exitTvApp}
+                    />
+                )}
+            </TvChunkLoadBoundary>
+            {chunkFailure && <TvChunkFailureOverlay onBackHome={dismissChunkFailure} />}
         </div>
     );
 };

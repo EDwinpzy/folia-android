@@ -181,6 +181,11 @@ export default {
       "lyrics": "歌词动效",
       "background": "背景动效"
     },
+    "failure": {
+      "title": "播放器资源加载失败",
+      "hint": "请返回首页并重新打开应用。按返回键回到首页。",
+      "home": "返回首页"
+    },
     "search": {
       "open": "搜索歌曲、歌手或专辑",
       "title": "搜索",

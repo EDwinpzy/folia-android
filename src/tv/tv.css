@@ -1279,6 +1279,10 @@ img {
     z-index: 130;
 }
 
+.tv-chunk-failure-overlay {
+    z-index: 150;
+}
+
 .tv-exit-panel {
     width: min(650px, 100%);
 }
@@ -1303,6 +1307,13 @@ img {
     font-size: clamp(27px, 2.8vh, 32px);
     font-weight: 650;
     letter-spacing: -0.02em;
+}
+
+.tv-chunk-failure-hint {
+    margin: 12px 0 0;
+    color: var(--tv-text-muted);
+    font-size: clamp(14px, 0.8vw, 16px);
+    line-height: 1.5;
 }
 
 .tv-exit-actions {
