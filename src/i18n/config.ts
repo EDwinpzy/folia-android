@@ -5,31 +5,8 @@ import zhCN from './locales/zh-CN.ts';
 import zhTW from 'virtual:folia-locale-zh-TW';
 import ind from './locales/in.ts';
 import vi from './locales/vi.ts';
+import { flattenLocale } from './flattenLocale';
 import { resolveMissingTranslation } from './missingTranslation';
-
-/*
- * Chinese fallback for keys the active locale does not contain.
- * zh-CN is flattened when this module loads into one dotted-key map, which
- * parseMissingKeyHandler reads through resolveMissingTranslation. A repeated
- * path keeps the position of its first write and the value of its last write.
- * Arrays are indexed (`items.0`); empty objects add no keys; other leaves
- * are String(value).
- */
-export function flattenLocale(obj: Record<string, any>, prefix = ''): Record<string, string> {
-  const result: Record<string, string> = {};
-  const visit = (node: Record<string, any>, pathPrefix: string) => {
-    for (const [key, value] of Object.entries(node)) {
-      const path = pathPrefix ? `${pathPrefix}.${key}` : key;
-      if (typeof value === 'object' && value !== null) {
-        visit(value, path);
-      } else {
-        result[path] = String(value);
-      }
-    }
-  };
-  visit(obj, prefix);
-  return result;
-}
 
 const ZH_FALLBACKS: Record<string, string> = flattenLocale(zhCN);
 

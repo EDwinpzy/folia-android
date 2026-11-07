@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { motion, MotionValue, Variants, useMotionValueEvent } from 'framer-motion';
+import React, { useMemo } from 'react';
+import { motion, MotionValue, Variants } from 'framer-motion';
 import { Theme, Word as WordType } from '../../../types';
 import { GlowWord } from '../GlowWord';
 import { getGlowWordActiveEndTime, type GlowWordRenderProfile } from '../glowWordTiming';
@@ -7,6 +7,7 @@ import { resolveLyricTextDirection } from '../../../utils/lyrics/textDirection';
 import { PARTITA_WORD_LAYOUT_STYLE, type WordLayoutConfig, buildPartitaWordConfigs, getActiveColor } from './partitaLayout';
 import { type PartitaRowSpacing } from './partitaOverlap';
 import { OVERLAP_FIT_ROW_ATTRIBUTE } from '../useOverlapFit';
+import { useGlowWordStatus } from '../useGlowWordStatus';
 
 // src/components/visualizer/partita/PartitaChunk.tsx
 // 一列中的一个 chunk：组合 GlowWord 与引导线，chunk 自身只订阅粗粒度状态。
@@ -27,25 +28,16 @@ export const PartitaChunk: React.FC<{
     baseColor: string;
     renderProfile: GlowWordRenderProfile;
     isChorus?: boolean;
+    reducedEffects?: boolean;
     showGuideLines: boolean;
     /** With avoidOverlap: the gaps this row's words and the row itself keep (partitaOverlap.ts). */
     overlapSpacing?: PartitaRowSpacing;
     fontSize: string;
-}> = ({ chunkWords, displayWords, config, guideIndex, currentTime, theme, layoutVariants, bodyVariants, baseColor, renderProfile, isChorus, showGuideLines, overlapSpacing, fontSize }) => {
-    const [chunkStatus, setChunkStatus] = useState<'waiting' | 'active' | 'passed'>('waiting');
-
+}> = ({ chunkWords, displayWords, config, guideIndex, currentTime, theme, layoutVariants, bodyVariants, baseColor, renderProfile, isChorus, reducedEffects, showGuideLines, overlapSpacing, fontSize }) => {
     const chunkStartTime = chunkWords[0].startTime;
     const chunkEndTime = getGlowWordActiveEndTime(chunkWords[chunkWords.length - 1], renderProfile);
 
-    useMotionValueEvent(currentTime, 'change', (latest: number) => {
-        let newStatus: 'waiting' | 'active' | 'passed' = 'waiting';
-        if (latest >= chunkStartTime - renderProfile.wordLookahead && latest <= chunkEndTime) {
-            newStatus = 'active';
-        } else if (latest > chunkEndTime) {
-            newStatus = 'passed';
-        }
-        if (newStatus !== chunkStatus) setChunkStatus(newStatus);
-    });
+    const chunkStatus = useGlowWordStatus(currentTime, chunkStartTime, chunkEndTime, renderProfile.wordLookahead);
 
     const activeColor = getActiveColor(displayWords.map(w => w.text).join(' '), theme);
     const guidePosition = guideIndex % 2 === 0 ? 'left' : 'right';
@@ -197,6 +189,7 @@ export const PartitaChunk: React.FC<{
                         activeColor={getActiveColor(w.text, theme)}
                         renderProfile={renderProfile}
                         isChorus={isChorus}
+                        reducedEffects={reducedEffects}
                         fontSize={fontSize}
                         layoutStyle={overlapSpacing?.words[idx] ?? PARTITA_WORD_LAYOUT_STYLE}
                     />

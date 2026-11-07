@@ -2,6 +2,7 @@ import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { DEFAULT_CLASSIC_TUNING, AudioBands, type ClassicTuning } from '../../../types';
+import { useElementSize } from '../../../hooks/useElementWidth';
 import { getLineRenderEndTime } from '../../../utils/lyrics/renderHints';
 import { resolveLyricTextDirection } from '../../../utils/lyrics/textDirection';
 import { useVisualizerRuntime } from '../runtime';
@@ -104,12 +105,15 @@ const Visualizer: React.FC<VisualizerProps> = (props) => {
     });
     const activeLineRenderProfile = activeLine ? resolveGlowWordRenderProfile(activeLine) : null;
     const activeWordRenderProfile = activeLineRenderProfile ?? (activeLine ? resolveGlowWordRenderProfile(activeLine) : null);
-    const activeLineContainerMotion = getGlowWordLineContainerMotion(activeLineRenderProfile);
+    const activeLineContainerMotion = getGlowWordLineContainerMotion(activeLineRenderProfile, props.reducedEffects);
+
+    const stageContentRef = useRef<HTMLDivElement | null>(null);
+    const stageSize = useElementSize(stageContentRef);
+    const [isProjectionStage, setIsProjectionStage] = useState(false);
 
     const [viewportWidth, setViewportWidth] = useState(() => (
         typeof window === 'undefined' ? 1200 : window.innerWidth
     ));
-
     // Only the overlap fit reads the height: a line that no longer fits a shorter window shrinks again.
     const [viewportHeight, setViewportHeight] = useState(() => (
         typeof window === 'undefined' ? 800 : window.innerHeight
@@ -121,8 +125,21 @@ const Visualizer: React.FC<VisualizerProps> = (props) => {
             setViewportHeight(window.innerHeight);
         };
         window.addEventListener('resize', handleResize);
+        setIsProjectionStage(Boolean(stageContentRef.current?.closest('.tv-visualizer-stage')));
         return () => window.removeEventListener('resize', handleResize);
     }, []);
+
+    const fallbackViewportWidth = typeof window === 'undefined' ? 1200 : window.innerWidth;
+    const fallbackViewportHeight = typeof window === 'undefined' ? 720 : window.innerHeight * 0.7;
+    const layoutWidth = isProjectionStage && stageSize.width > 0
+        ? stageSize.width
+        : fallbackViewportWidth;
+    const layoutHeight = isProjectionStage && stageSize.height > 0
+        ? stageSize.height
+        : fallbackViewportHeight;
+    const projectionFontPx = isProjectionStage
+        ? Math.max(24, Math.min(52, layoutWidth * 0.058, layoutHeight * 0.112))
+        : null;
 
     const displayWords = useMemo(() => {
         if (!activeLine) return [];
@@ -134,16 +151,19 @@ const Visualizer: React.FC<VisualizerProps> = (props) => {
     }, [activeLine, resolvedClassicTuning.useLegacyLayout]);
 
     // With avoidOverlap the spaced-out line may outgrow the lyric area; it then shrinks to fit.
-    const lyricAreaRef = useRef<HTMLDivElement>(null);
     const overlapFit = useOverlapFit(
         Boolean(resolvedClassicTuning.avoidOverlap) && !resolvedClassicTuning.useLegacyLayout,
         activeLine?.startTime,
-        lyricAreaRef,
+        stageContentRef,
         [displayWords, lyricsFontScale, viewportWidth, viewportHeight, resolvedClassicTuning, theme],
     );
     const lineFontScale = lyricsFontScale * overlapFit;
-    const mainFontSize = `clamp(${(2.25 * lineFontScale).toFixed(3)}rem, ${(6 * lineFontScale).toFixed(3)}vw, ${(4.5 * lineFontScale).toFixed(3)}rem)`;
-    const emptyFontSize = `clamp(${(1.5 * lyricsFontScale).toFixed(3)}rem, ${(3.5 * lyricsFontScale).toFixed(3)}vw, ${(2.25 * lyricsFontScale).toFixed(3)}rem)`;
+    const mainFontSize = projectionFontPx
+        ? `${projectionFontPx.toFixed(2)}px`
+        : `clamp(${(2.25 * lineFontScale).toFixed(3)}rem, ${(6 * lineFontScale).toFixed(3)}vw, ${(4.5 * lineFontScale).toFixed(3)}rem)`;
+    const emptyFontSize = projectionFontPx
+        ? `${Math.max(22, projectionFontPx * 0.56).toFixed(2)}px`
+        : `clamp(${(1.5 * lyricsFontScale).toFixed(3)}rem, ${(3.5 * lyricsFontScale).toFixed(3)}vw, ${(2.25 * lyricsFontScale).toFixed(3)}rem)`;
     const { translationFontSize, upcomingFontSize } = resolveSubtitleFontSizes(lyricsFontScale);
 
     // Generate a stable random layout configuration for the current line.
@@ -169,8 +189,12 @@ const Visualizer: React.FC<VisualizerProps> = (props) => {
         const isInterlude = activeLine.fullText === "......";
 
         const lineConfig: LineLayoutConfig = {
-            justifyContent: isInterlude ? 'justify-center' : justifyOptions[Math.floor(seed % justifyOptions.length)], // deterministic random
-            alignItems: alignOptions[Math.floor((seed * 2) % alignOptions.length)],
+            justifyContent: isInterlude || projectionFontPx
+                ? 'justify-center'
+                : justifyOptions[Math.floor(seed % justifyOptions.length)], // deterministic random
+            alignItems: projectionFontPx
+                ? 'items-center'
+                : alignOptions[Math.floor((seed * 2) % alignOptions.length)],
             perspective: isChaotic ? 500 + (seed % 500) : 1000,
         };
 
@@ -185,11 +209,19 @@ const Visualizer: React.FC<VisualizerProps> = (props) => {
             const maxPx = 4.5 * fontScale * rem;
             return Math.max(minPx, Math.min(valPx, maxPx));
         };
-        const pxFontSize = getPixelFontSize(lineFontScale, viewportWidth);
+        const pxFontSize = projectionFontPx ?? getPixelFontSize(lineFontScale, layoutWidth);
         const wordWidths = displayWords.map(w => measureWordWidth(w.text, pxFontSize, fontStack, fontWeight));
 
-        const baseSpread = isChaotic ? 60 : isCalm ? 0 : 20;
-        const baseRotate = isChaotic ? 30 : isCalm ? 0 : 5;
+        const baseSpread = isChaotic
+            ? (projectionFontPx ? 24 : 60)
+            : isCalm
+                ? 0
+                : (projectionFontPx ? 8 : 20);
+        const baseRotate = isChaotic
+            ? (projectionFontPx ? 12 : 30)
+            : isCalm
+                ? 0
+                : (projectionFontPx ? 2 : 5);
 
         // In an RTL line the next word sits to the LEFT, so its physical x offsets close the gap the other way.
         const rtl = resolveLyricTextDirection(activeLine.fullText) === 'rtl';
@@ -208,9 +240,13 @@ const Visualizer: React.FC<VisualizerProps> = (props) => {
             return {
                 width: wordWidths[i] ?? 0,
                 pose: {
-                    scale: isChaotic ? 0.8 + random(4) * 0.6 : 1.1 + random(4) * 0.2,
+                    scale: isChaotic
+                        ? (projectionFontPx ? 0.78 + random(4) * 0.3 : 0.8 + random(4) * 0.6)
+                        : (projectionFontPx ? 0.92 + random(4) * 0.14 : 1.1 + random(4) * 0.2),
                     rotate: resolvedClassicTuning.enableWordRotation ? (random(3) - 0.5) * baseRotate * 2 : 0,
-                    passedRotate: resolvedClassicTuning.enableWordRotation ? (random(8) - 0.5) * 45 : 0,
+                    passedRotate: resolvedClassicTuning.enableWordRotation
+                        ? (random(8) - 0.5) * (projectionFontPx ? (isChaotic ? 20 : 10) : 45)
+                        : 0,
                 },
                 offset: { x: (random(1) - 0.5) * baseSpread * 2, y: (random(2) - 0.5) * baseSpread * 2 },
             };
@@ -294,7 +330,9 @@ const Visualizer: React.FC<VisualizerProps> = (props) => {
                 rotate: placement.pose.rotate,
                 scale: wordConfigScale,
                 marginRight,
-                alignSelf: isChaotic && random(6) > 0.7 ? (random(7) > 0.5 ? 'flex-start' : 'flex-end') : 'auto',
+                alignSelf: !projectionFontPx && isChaotic && random(6) > 0.7
+                    ? (random(7) > 0.5 ? 'flex-start' : 'flex-end')
+                    : 'auto',
                 passedRotate: placement.pose.passedRotate
             };
         });
@@ -306,14 +344,14 @@ const Visualizer: React.FC<VisualizerProps> = (props) => {
         }
 
         return { wordConfigs, lineConfig };
-    }, [activeLine, displayWords, resolvedClassicTuning.enableWordRotation, resolvedClassicTuning.useLegacyLayout, resolvedClassicTuning.wordSpacing, resolvedClassicTuning.avoidOverlap, theme, lineFontScale, viewportWidth]);
+    }, [activeLine, displayWords, projectionFontPx, resolvedClassicTuning.enableWordRotation, resolvedClassicTuning.useLegacyLayout, resolvedClassicTuning.wordSpacing, resolvedClassicTuning.avoidOverlap, theme, lineFontScale, viewportWidth, layoutWidth]);
 
     const layoutVariants = buildGlowWordLayoutVariants(theme.animationIntensity, resolvedClassicTuning.enableWordRotation);
     const bodyVariants = glowWordBodyVariants;
 
     const lyricContainerFloat = useMemo(() => {
         const multiplier = resolvedClassicTuning.breathingFloatMultiplier;
-        if (multiplier <= 0) {
+        if (multiplier <= 0 || props.reducedEffects) {
             return null;
         }
 
@@ -338,7 +376,96 @@ const Visualizer: React.FC<VisualizerProps> = (props) => {
                 ease: "easeInOut" as const
             }
         };
-    }, [resolvedClassicTuning.breathingFloatMultiplier, theme.animationIntensity]);
+    }, [resolvedClassicTuning.breathingFloatMultiplier, theme.animationIntensity, props.reducedEffects]);
+
+    const renderedWords = activeLine
+        ? displayWords.map((word, idx) => {
+            const config = wordConfigs[idx] || {
+                id: `fallback-${idx}`,
+                x: 0,
+                y: 0,
+                rotate: 0,
+                scale: 1,
+                marginRight: '0.5rem',
+                alignSelf: 'auto',
+                passedRotate: 0,
+            };
+            const activeColor = resolveWordColor(word.text, theme.wordColors, theme.accentColor);
+
+            return (
+                <GlowWord
+                    key={`${word.text}-${idx}-${activeLine.startTime}`}
+                    word={word}
+                    config={config}
+                    currentTime={currentTime}
+                    theme={theme}
+                    layoutVariants={layoutVariants}
+                    bodyVariants={bodyVariants}
+                    baseColor={theme.primaryColor}
+                    activeColor={activeColor}
+                    renderProfile={activeWordRenderProfile!}
+                    isChorus={activeLine.isChorus}
+                    reducedEffects={props.reducedEffects}
+                    fontSize={mainFontSize}
+                    layoutStyle={{ marginRight: config.marginRight, alignSelf: config.alignSelf }}
+                />
+            );
+        })
+        : null;
+
+    const lyricContent = props.reducedEffects ? (
+        showText && activeLine ? (
+            <div
+                key={activeLine.startTime}
+                className={`flex flex-wrap w-full max-w-6xl content-center ${lineConfig.justifyContent} ${lineConfig.alignItems}`}
+                style={{ minHeight: '300px' }}
+            >
+                {renderedWords}
+            </div>
+        ) : showText ? (
+            <div
+                key="empty"
+                className="text-2xl opacity-50 absolute"
+                style={{
+                    color: theme.secondaryColor,
+                    fontSize: emptyFontSize,
+                }}
+            >
+                {t('ui.waitingForMusic')}
+            </div>
+        ) : null
+    ) : (
+        <AnimatePresence mode="popLayout">
+            {showText && activeLine && (
+                <motion.div
+                    key={activeLine.startTime}
+                    initial={activeLineContainerMotion.initial}
+                    animate={activeLineContainerMotion.animate}
+                    exit={activeLineContainerMotion.exit}
+                    className={`flex flex-wrap w-full max-w-6xl content-center ${lineConfig.justifyContent} ${lineConfig.alignItems}`}
+                    style={{ perspective: `${lineConfig.perspective}px`, minHeight: '300px' }}
+                >
+                    {renderedWords}
+                </motion.div>
+            )}
+
+            {showText && !activeLine && (
+                <motion.div
+                    key="empty"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="text-2xl opacity-50 absolute"
+                    style={{
+                        color: theme.secondaryColor,
+                        fontSize: emptyFontSize,
+                    }}
+                >
+                    {t('ui.waitingForMusic')}
+                </motion.div>
+            )}
+        </AnimatePresence>
+    );
 
     return (
         <VisualizerShell
@@ -348,79 +475,29 @@ const Visualizer: React.FC<VisualizerProps> = (props) => {
             sharedProps={props}
         >
             {/* Main Container */}
-            <motion.div
-                ref={lyricAreaRef}
-                className="relative z-10 w-full h-[70vh] flex items-center justify-center p-8 pointer-events-none will-change-transform"
-                animate={lyricContainerFloat?.animate}
-                transition={lyricContainerFloat?.transition}
-            >
-                {/* A line hidden because the text is (a window over the player) only fades: the next line's
-                    exit grows and blurs it, and this layer covers most of the screen. */}
-                <AnimatePresence mode='popLayout' custom={!showText}>
-                    {showText && activeLine && (
-                        <motion.div
-                            key={activeLine.startTime}
-                            initial={activeLineContainerMotion.initial}
-                            animate={activeLineContainerMotion.animate}
-                            custom={!showText}
-                            variants={{ leave: (hidden: boolean) => (hidden ? TEXT_HIDDEN_EXIT : activeLineContainerMotion.exit) }}
-                            exit="leave"
-                            // An RTL line (Uyghur, Arabic...) flows its words from the right.
-                            dir={resolveLyricTextDirection(activeLine.fullText)}
-                            className={`flex flex-wrap w-full max-w-6xl content-center ${lineConfig.justifyContent} ${lineConfig.alignItems}`}
-                            {...{ [OVERLAP_FIT_LINE_ATTRIBUTE]: activeLine.startTime }}
-                            style={{
-                                perspective: `${lineConfig.perspective}px`,
-                                // The overlap fit measures the content: the rows are centred either way.
-                                minHeight: lineConfig.rowGap === undefined ? '300px' : undefined,
-                                rowGap: lineConfig.rowGap,
-                                paddingTop: lineConfig.reachTop,
-                                paddingBottom: lineConfig.reachBottom,
-                            }}
-                        >
-                            {displayWords.map((word, idx) => {
-                                const config = wordConfigs[idx] || { id: `fallback-${idx}`, x: 0, y: 0, rotate: 0, scale: 1, marginRight: '0.5rem', alignSelf: 'auto', passedRotate: 0 };
-
-                                const activeColor = resolveWordColor(word.text, theme.wordColors, theme.accentColor);
-
-                                return (
-                                    <GlowWord
-                                        key={`${word.text}-${idx}-${activeLine.startTime}`}
-                                        word={word}
-                                        config={config}
-                                        currentTime={currentTime}
-                                        theme={theme}
-                                        layoutVariants={layoutVariants}
-                                        bodyVariants={bodyVariants}
-                                        baseColor={theme.primaryColor}
-                                        activeColor={activeColor}
-                                        renderProfile={activeWordRenderProfile!}
-                                        isChorus={activeLine.isChorus}
-                                        fontSize={mainFontSize}
-                                        layoutStyle={{ marginInlineEnd: config.marginRight, alignSelf: config.alignSelf }}
-                                    />
-                                );
-                            })}
-                        </motion.div>
-                    )}
-
-                    {showText && !activeLine && (
-                        <motion.div
-                            key="empty"
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            exit={{ opacity: 0 }}
-                            className="text-2xl opacity-50 absolute"
-                            style={{
-                                color: theme.secondaryColor,
-                                fontSize: emptyFontSize,
-                            }}
-                        >
-                            {t('ui.waitingForMusic')}
-                        </motion.div>
-                    )}
-                </AnimatePresence>
-            </motion.div>
+            {props.reducedEffects ? (
+                <div
+                    ref={stageContentRef}
+                    className="relative z-10 w-full h-[70vh] flex items-center justify-center p-8 pointer-events-none"
+                    style={{
+                        '--tv-visualizer-primary-font-size': mainFontSize,
+                    } as React.CSSProperties}
+                >
+                    {lyricContent}
+                </div>
+            ) : (
+                <motion.div
+                    ref={stageContentRef}
+                    className="relative z-10 w-full h-[70vh] flex items-center justify-center p-8 pointer-events-none will-change-transform"
+                    animate={lyricContainerFloat?.animate}
+                    transition={lyricContainerFloat?.transition}
+                    style={{
+                        '--tv-visualizer-primary-font-size': mainFontSize,
+                    } as React.CSSProperties}
+                >
+                    {lyricContent}
+                </motion.div>
+            )}
 
             <VisualizerSubtitleOverlay
                 showText={showText}

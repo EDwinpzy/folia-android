@@ -9,7 +9,7 @@
 | [第一个模组：从零到跑起来](quickstart.md) | 第一次写先看这一页：一条命令生成起点，一条命令检查，在应用里跑起来 |
 | 本指南 | 怎么做：开发环境、示例、编写要点、发布流程 |
 | [Folium API 参考](api.md) | 查什么：每个接口、成员和类型（由契约自动生成） |
-| [Folium 规范](../../mods/README.md) | 规则是什么：清单字段、权限、注册表语义、事件、安全模型、版本策略 |
+| [Folium 规范（上游桌面版）](https://github.com/chthollyphile/folia-major/blob/main/mods/README.md) | 规则是什么：清单字段、权限、注册表语义、事件、安全模型、版本策略；本 Android fork 未包含规范文件 |
 
 ## 1. 开始之前
 

@@ -10,7 +10,9 @@ import {
     type Theme,
 } from '../../../../types';
 import { extractRepresentativeColors } from '../../../../utils/colorExtractor';
+import { useDevicePerformanceProfile } from '../../../../hooks/useDevicePerformanceProfile';
 import { updatePaperShaderUniforms } from '../../../../utils/paperShaderUniforms';
+import { resolvePaperShaderPixelCount } from '../../../../utils/paperShaderBudget';
 import { createPaperShaderReleaseRef, PAPER_SHADER_CONTEXT_ATTRIBUTES } from '../../../../utils/paperShaderContext';
 import { useFirstFrameDrawn } from '../../styleTransition/firstFrame';
 import { useBlendedColors } from '../useBlendedColors';
@@ -42,7 +44,7 @@ interface LatentBackgroundProps {
     blendProgress?: MotionValue<number>;
 }
 
-const MAX_SHADER_PIXELS = 1280 * 720;
+const BALANCED_MAX_SHADER_PIXELS = 1280 * 720;
 const PAUSED_SPEED_SCALE = 0.12;
 // How fast the speed goes from playing to paused or back, as a time constant: settled in about a second.
 const PAUSE_EASE_MS = 300;
@@ -152,6 +154,7 @@ const LatentBackground: React.FC<LatentBackgroundProps> = ({
     blendMs = 0,
     blendProgress,
 }) => {
+    const { tier } = useDevicePerformanceProfile();
     const ditheringRef = useRef<PaperShaderElement | null>(null);
     const meshRef = useRef<PaperShaderElement | null>(null);
     // Stable callback refs: they also lose each shader's WebGL context when it unmounts.
@@ -169,6 +172,10 @@ const LatentBackground: React.FC<LatentBackgroundProps> = ({
     const tuning = tuningOverride ?? DEFAULT_LATENT_BACKGROUND_TUNING;
     const showDithering = tuning.displayMode !== 'mesh';
     const showMesh = tuning.displayMode !== 'dithering';
+    const maxShaderPixels = resolvePaperShaderPixelCount(
+        BALANCED_MAX_SHADER_PIXELS,
+        tier === 'constrained',
+    );
     pausedRef.current = paused;
     // A copy mounted for a change of type is ready once the cover's colours are read.
     const colorsDrawn = useFirstFrameDrawn();
@@ -394,6 +401,7 @@ const LatentBackground: React.FC<LatentBackgroundProps> = ({
                 >
                     <MeshGradient
                         ref={meshShaderRef}
+                        className="folia-paper-shader-fill"
                         width="100%"
                         height="100%"
                         colors={shaderColors.mesh}
@@ -403,7 +411,7 @@ const LatentBackground: React.FC<LatentBackgroundProps> = ({
                         grainOverlay={0.01}
                         speed={staticMode ? 0 : tuning.meshSpeed}
                         minPixelRatio={1}
-                        maxPixelCount={MAX_SHADER_PIXELS}
+                        maxPixelCount={maxShaderPixels}
                         webGlContextAttributes={PAPER_SHADER_CONTEXT_ATTRIBUTES}
                         style={{ width: '100%', height: '100%' }}
                     />
@@ -422,6 +430,7 @@ const LatentBackground: React.FC<LatentBackgroundProps> = ({
                 >
                     <Dithering
                         ref={ditheringShaderRef}
+                        className="folia-paper-shader-fill"
                         width="100%"
                         height="100%"
                         colorBack={shaderColors.ditheringBack}
@@ -431,7 +440,7 @@ const LatentBackground: React.FC<LatentBackgroundProps> = ({
                         size={tuning.ditheringSize}
                         speed={staticMode ? 0 : tuning.ditheringSpeed}
                         minPixelRatio={1}
-                        maxPixelCount={MAX_SHADER_PIXELS}
+                        maxPixelCount={maxShaderPixels}
                         webGlContextAttributes={PAPER_SHADER_CONTEXT_ATTRIBUTES}
                         style={{ width: '100%', height: '100%' }}
                     />

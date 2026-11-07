@@ -2,6 +2,7 @@ import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence, useMotionValueEvent } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { DEFAULT_PARTITA_TUNING, Line } from '../../../types';
+import { useElementSize } from '../../../hooks/useElementWidth';
 import { getLineRenderEndTime } from '../../../utils/lyrics/renderHints';
 import { shouldPreheatLine, useVisualizerRuntime } from '../runtime';
 import { type VisualizerSharedProps } from '../definition';
@@ -63,16 +64,23 @@ const VisualizerPartita: React.FC<VisualizerPartitaProps> = (props) => {
         subtitleOverlayLayout,
     } = props;
     const { t } = useTranslation();
-    const [windowHeight, setWindowHeight] = useState(800);
     const resolvedPartitaTuning = useMemo(() => resolvePartitaTuning(partitaTuning), [partitaTuning]);
     const layoutCacheRef = useRef<Map<string, PartitaSequentialLayout>>(new Map());
+    const stageContentRef = useRef<HTMLDivElement | null>(null);
+    const stageSize = useElementSize(stageContentRef);
+    const [isProjectionStage, setIsProjectionStage] = useState(false);
 
     useEffect(() => {
-        setWindowHeight(window.innerHeight);
-        const handleResize = () => setWindowHeight(window.innerHeight);
-        window.addEventListener('resize', handleResize);
-        return () => window.removeEventListener('resize', handleResize);
+        setIsProjectionStage(Boolean(stageContentRef.current?.closest('.tv-visualizer-stage')));
     }, []);
+
+    const windowHeight = isProjectionStage && stageSize.height > 0
+        ? stageSize.height
+        : (typeof window === 'undefined' ? 800 : window.innerHeight);
+    const measuredWidth = isProjectionStage && stageSize.width > 0 ? stageSize.width : 0;
+    const projectionFontPx = isProjectionStage
+        ? Math.max(24, Math.min(46, measuredWidth * 0.056, windowHeight * 0.105))
+        : null;
 
     const {
         activeLine,
@@ -86,15 +94,22 @@ const VisualizerPartita: React.FC<VisualizerPartitaProps> = (props) => {
         getLineEndTime: getLineRenderEndTime,
     });
     const activeLineRenderProfile = activeLine ? resolveGlowWordRenderProfile(activeLine) : null;
-    const activeLineContainerMotion = getGlowWordLineContainerMotion(activeLineRenderProfile);
+    const activeLineContainerMotion = getGlowWordLineContainerMotion(activeLineRenderProfile, props.reducedEffects);
 
     const sequentialLayout = useMemo(() => {
         if (!activeLine) {
             return EMPTY_PARTITA_LAYOUT;
         }
 
-        return getOrBuildPartitaLayout(layoutCacheRef.current, activeLine, theme, windowHeight, resolvedPartitaTuning);
-    }, [activeLine, theme, windowHeight, resolvedPartitaTuning]);
+        return getOrBuildPartitaLayout(
+            layoutCacheRef.current,
+            activeLine,
+            theme,
+            windowHeight,
+            resolvedPartitaTuning,
+            measuredWidth,
+        );
+    }, [activeLine, measuredWidth, theme, windowHeight, resolvedPartitaTuning]);
 
     const nextLineRef = useRef<Line | null>(upcomingLine);
     useEffect(() => {
@@ -111,7 +126,14 @@ const VisualizerPartita: React.FC<VisualizerPartitaProps> = (props) => {
             return;
         }
 
-        getOrBuildPartitaLayout(layoutCacheRef.current, nextLine, theme, windowHeight, resolvedPartitaTuning);
+        getOrBuildPartitaLayout(
+            layoutCacheRef.current,
+            nextLine,
+            theme,
+            windowHeight,
+            resolvedPartitaTuning,
+            measuredWidth,
+        );
     });
 
     // avoidOverlap: every chunk's gaps, worked out once per line from its words measured in em.
@@ -135,15 +157,16 @@ const VisualizerPartita: React.FC<VisualizerPartitaProps> = (props) => {
     }, [resolvedPartitaTuning.avoidOverlap, sequentialLayout, theme]);
 
     // With avoidOverlap the spaced-out line may outgrow the lyric area; it then shrinks to fit.
-    const lyricAreaRef = useRef<HTMLDivElement>(null);
     const overlapFit = useOverlapFit(
         Boolean(resolvedPartitaTuning.avoidOverlap),
         activeLine?.startTime,
-        lyricAreaRef,
+        stageContentRef,
         [sequentialLayout, lyricsFontScale, windowHeight, theme],
     );
     const densityScale = (sequentialLayout.totalGraphemes > 40 ? 0.8 : 1) * overlapFit;
-    const mainFontSize = `clamp(${(2.5 * densityScale * lyricsFontScale).toFixed(3)}rem, ${(5.5 * densityScale * lyricsFontScale).toFixed(3)}vw, ${(4.5 * densityScale * lyricsFontScale).toFixed(3)}rem)`;
+    const mainFontSize = projectionFontPx
+        ? `${(projectionFontPx * densityScale).toFixed(2)}px`
+        : `clamp(${(2.5 * densityScale * lyricsFontScale).toFixed(3)}rem, ${(5.5 * densityScale * lyricsFontScale).toFixed(3)}vw, ${(4.5 * densityScale * lyricsFontScale).toFixed(3)}rem)`;
     const emptyFontSize = `clamp(${(1.2 * lyricsFontScale).toFixed(3)}rem, ${(2.8 * lyricsFontScale).toFixed(3)}vw, ${(1.9 * lyricsFontScale).toFixed(3)}rem)`;
     const translationFontSize = `clamp(${(1.05 * lyricsFontScale).toFixed(3)}rem, ${(2.2 * lyricsFontScale).toFixed(3)}vw, ${(1.2 * lyricsFontScale).toFixed(3)}rem)`;
     const upcomingFontSize = `clamp(${(0.875 * lyricsFontScale).toFixed(3)}rem, ${(1.8 * lyricsFontScale).toFixed(3)}vw, ${(1 * lyricsFontScale).toFixed(3)}rem)`;
@@ -181,10 +204,13 @@ const VisualizerPartita: React.FC<VisualizerPartitaProps> = (props) => {
             sharedProps={props}
         >
             <motion.div
-                ref={lyricAreaRef}
+                ref={stageContentRef}
                 className="relative z-10 w-full h-[70vh] flex items-center justify-center p-8 pointer-events-none will-change-transform"
-                animate={lyricContainerFloat.animate}
-                transition={lyricContainerFloat.transition}
+                animate={props.reducedEffects ? undefined : lyricContainerFloat.animate}
+                transition={props.reducedEffects ? undefined : lyricContainerFloat.transition}
+                style={{
+                    '--tv-visualizer-primary-font-size': mainFontSize,
+                } as React.CSSProperties}
             >
                 {/* A line hidden because the text is (a window over the player) only fades: the next line's
                     exit grows and blurs it, and this layer covers most of the screen. */}
@@ -224,6 +250,7 @@ const VisualizerPartita: React.FC<VisualizerPartitaProps> = (props) => {
                                                     theme={theme}
                                                     layoutVariants={layoutVariants}
                                                     bodyVariants={bodyVariants}
+                                                    reducedEffects={props.reducedEffects}
                                                     baseColor={theme.primaryColor}
                                                     renderProfile={activeLineRenderProfile}
                                                     isChorus={activeLine.isChorus}

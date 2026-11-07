@@ -3,6 +3,7 @@ package top.izuna.foliamajor;
 import android.content.ComponentCallbacks2;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.Intent;
 import android.os.Bundle;
 import android.os.SystemClock;
 import android.webkit.RenderProcessGoneDetail;
@@ -54,6 +55,10 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(FoliaYtmPlugin.class);
         registerPlugin(FoliaFnMusicPlugin.class);
         registerPlugin(top.izuna.foliamajor.coloros.FoliaColorOsLyricsPlugin.class);
+        Intent launchIntent = getIntent();
+        String voicePlayQuery = VoicePlayIntents.readQuery(launchIntent);
+        VoicePlayIntents.clear(launchIntent);
+        if (voicePlayQuery != null) FoliaNativePlugin.offerVoicePlayRequest(voicePlayQuery);
         super.onCreate(savedInstanceState);
         attachYtmSignInLauncher();
         CrashDiagnostics.recordText(
@@ -95,6 +100,15 @@ public class MainActivity extends BridgeActivity {
         webView.postDelayed(() -> restoreAdaptiveLayout(webView), 1500);
         webView.postDelayed(() -> PhoneFitCutout.apply(this), 500);
         webView.postDelayed(() -> PhoneFitCutout.apply(this), 1500);
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        String voicePlayQuery = VoicePlayIntents.readQuery(intent);
+        VoicePlayIntents.clear(intent);
+        if (voicePlayQuery != null) FoliaNativePlugin.offerVoicePlayRequest(voicePlayQuery);
     }
 
     /**
