@@ -176,4 +176,3 @@ describe('pickNextFocusRect', () => {
         expect(pickNextFocusRect(list, 'track-2', 'down')?.id).toBe('footer-action');
     });
 });
-

@@ -26,7 +26,7 @@ public class TvActivity extends MainActivity {
             .setHostname("localhost")
             .setAndroidScheme("https")
             .setAllowMixedContent(true)
-            .setStartPath("/tv.html")
+            .setStartPath(getStartPath())
             .setBackgroundColor("#07070c")
             .setWebContentsDebuggingEnabled(debuggable)
             // Capacitor serializes every plugin result before logging it. On the projector that
@@ -36,6 +36,10 @@ public class TvActivity extends MainActivity {
             .setLoggingEnabled(false)
             .create();
         super.load();
+    }
+
+    protected String getStartPath() {
+        return "/tv.html";
     }
 
     @Override
@@ -96,4 +100,3 @@ public class TvActivity extends MainActivity {
         );
     }
 }
-

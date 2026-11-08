@@ -28,4 +28,3 @@ ReactDOM.createRoot(rootElement).render(
         <TvApp />
     </React.StrictMode>,
 );
-

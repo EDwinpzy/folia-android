@@ -7,19 +7,30 @@ import type { SongResult } from '../../types';
 import type { ProviderCollection } from '../../types/onlineMusic';
 import { useTvCollectionTracks } from '../hooks/useTvCollectionTracks';
 import { resolveTvSongCoverUrl, TV_COVER_SIZE } from '../services/tvPlaybackSource';
+import { TvOverlayCloseButton } from './TvOverlayCloseButton';
+import { dismissTvOverlayOnBackdrop } from './tvOverlayDismiss';
 
 export const TvCollectionOverlay = ({
     collection,
     onPlayTracks,
+    onClose,
+    showCloseButton = true,
 }: {
     collection: ProviderCollection;
     onPlayTracks: (tracks: SongResult[], startIndex: number) => void;
+    onClose?: () => void;
+    showCloseButton?: boolean;
 }) => {
     const { t } = useTranslation();
     const { tracks, isLoading, error, reload } = useTvCollectionTracks(collection);
 
     return (
-        <section id="tv-layer-collection" data-tv-layer="collection" className="tv-overlay tv-collection-overlay">
+        <section
+            id="tv-layer-collection"
+            data-tv-layer="collection"
+            className="tv-overlay tv-collection-overlay"
+            onClick={dismissTvOverlayOnBackdrop(onClose)}
+        >
             <div
                 className="tv-overlay-panel"
                 role="dialog"
@@ -33,6 +44,7 @@ export const TvCollectionOverlay = ({
                             <h2 id="tv-collection-title">{collection.name}</h2>
                         </span>
                     </div>
+                    {onClose && showCloseButton && <TvOverlayCloseButton onClose={onClose} />}
                 </header>
 
                 <div className="tv-collection-body">
@@ -103,4 +115,3 @@ export const TvCollectionOverlay = ({
         </section>
     );
 };
-

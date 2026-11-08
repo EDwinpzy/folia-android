@@ -27,7 +27,10 @@ export const resolveTvEffectsRoute = (route: TvRoute): TvRoute => (
  * listener explicitly chooses background playback or a full exit; it never falls through to
  * Android's generic moveTaskToBack path without feedback.
  */
-export const resolveTvBackRoute = (route: TvRoute): TvRoute | null => {
+export const resolveTvBackRoute = (
+    route: TvRoute,
+    { offerExit = true }: { offerExit?: boolean } = {},
+): TvRoute | null => {
     if (
         route.overlay === 'login'
         || route.overlay === 'collection'
@@ -37,10 +40,13 @@ export const resolveTvBackRoute = (route: TvRoute): TvRoute | null => {
     ) {
         return { ...route, overlay: null };
     }
-    if (route.overlay === 'queue' || route.overlay === 'effects') {
+    if (route.overlay === 'queue') {
+        return route.page === 'home' ? TV_HOME_ROUTE : { ...route, overlay: 'controls' };
+    }
+    if (route.overlay === 'effects') {
         return { ...route, overlay: 'controls' };
     }
     if (route.page === 'player') return TV_HOME_ROUTE;
+    if (!offerExit) return null;
     return { page: 'home', overlay: 'exit' };
 };
-

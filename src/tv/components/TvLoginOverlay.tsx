@@ -8,6 +8,8 @@ import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { canRetryLogin } from '../../library/core/account/accountRules';
 import { LOGIN_CASE_TEXTS } from '../../components/login/window/loginCaseTexts';
 import type { TvAccountModel } from '../hooks/useTvAccount';
+import { TvOverlayCloseButton } from './TvOverlayCloseButton';
+import { dismissTvOverlayOnBackdrop } from './tvOverlayDismiss';
 
 const errorMessage = (error: unknown): string => (
     error instanceof Error ? error.message : String(error)
@@ -17,10 +19,14 @@ export const TvLoginOverlay = ({
     account,
     startError,
     onSwitchConfirmed,
+    onClose,
+    showCloseButton = true,
 }: {
     account: TvAccountModel;
     startError: string | null;
     onSwitchConfirmed: () => void;
+    onClose?: () => void;
+    showCloseButton?: boolean;
 }) => {
     const { t } = useTranslation();
     const compactProviderStrip = useMediaQuery('(max-width: 600px)');
@@ -106,7 +112,12 @@ export const TvLoginOverlay = ({
             : t('tv.account.title');
 
     return (
-        <section id="tv-layer-login" data-tv-layer="login" className="tv-overlay tv-login-overlay">
+        <section
+            id="tv-layer-login"
+            data-tv-layer="login"
+            className="tv-overlay tv-login-overlay"
+            onClick={dismissTvOverlayOnBackdrop(onClose)}
+        >
             <div
                 className="tv-overlay-panel tv-login-panel"
                 role="dialog"
@@ -122,6 +133,7 @@ export const TvLoginOverlay = ({
                             <h2 id="tv-login-title">{resolvedTitle}</h2>
                         </span>
                     </div>
+                    {onClose && showCloseButton && <TvOverlayCloseButton onClose={onClose} />}
                 </header>
 
                 <div className="tv-account-layout">

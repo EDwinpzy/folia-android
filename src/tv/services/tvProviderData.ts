@@ -44,4 +44,3 @@ export const refreshTvProviderAccount = (providerId: OnlineProviderId): Promise<
 export const logoutTvProviderAccount = async (providerId: OnlineProviderId): Promise<void> => {
     await omni.signOutAccount(providerId);
 };
-

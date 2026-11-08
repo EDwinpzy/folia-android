@@ -9,14 +9,20 @@ import type { SongResult } from '../../types';
 import { useTvSearch } from '../hooks/useTvSearch';
 import { isTvSpaceKey, resolveTvRemoteAction } from '../input/tvKeys';
 import { resolveTvSongCoverUrl, TV_COVER_SIZE } from '../services/tvPlaybackSource';
+import { TvOverlayCloseButton } from './TvOverlayCloseButton';
+import { dismissTvOverlayOnBackdrop } from './tvOverlayDismiss';
 
 // src/tv/components/TvSearchOverlay.tsx
 // 顶部搜索入口的遥控器界面：输入框支持平台键盘，方向键下移进入结果列表，OK 播放歌曲。
 
 export const TvSearchOverlay = ({
     onPlayTracks,
+    onClose,
+    showCloseButton = true,
 }: {
     onPlayTracks: (tracks: SongResult[], startIndex: number) => void;
+    onClose?: () => void;
+    showCloseButton?: boolean;
 }) => {
     const { t } = useTranslation();
     const search = useTvSearch();
@@ -42,7 +48,12 @@ export const TvSearchOverlay = ({
     }, [search.results.length, search.status]);
 
     return (
-        <section id="tv-layer-search" data-tv-layer="search" className="tv-overlay tv-search-overlay">
+        <section
+            id="tv-layer-search"
+            data-tv-layer="search"
+            className="tv-overlay tv-search-overlay"
+            onClick={dismissTvOverlayOnBackdrop(onClose)}
+        >
             <div
                 className="tv-overlay-panel tv-search-panel"
                 role="dialog"
@@ -56,6 +67,7 @@ export const TvSearchOverlay = ({
                             <h2 id="tv-search-title">{t('tv.search.title')}</h2>
                         </span>
                     </div>
+                    {onClose && showCloseButton && <TvOverlayCloseButton onClose={onClose} />}
                 </header>
 
                 <div className="tv-search-bar">

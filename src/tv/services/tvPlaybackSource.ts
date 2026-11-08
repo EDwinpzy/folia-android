@@ -110,4 +110,3 @@ export const loadTvSongLyrics = async ({
         if (isCurrent()) onLoadingChange(false);
     }
 };
-

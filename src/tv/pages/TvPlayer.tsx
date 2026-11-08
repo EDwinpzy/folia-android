@@ -1,6 +1,6 @@
 // src/tv/pages/TvPlayer.tsx
 
-import { useMemo } from 'react';
+import { useMemo, useRef, type PointerEvent as ReactPointerEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useVisualizerBackgroundConfig } from '../../components/visualizer/useVisualizerBackgroundConfig';
 import {
@@ -14,24 +14,35 @@ import { TvVisualizerStage } from '../components/TvVisualizerStage';
 import { useTvAudioAnalyser } from '../hooks/useTvAudioAnalyser';
 import type { TvPlayerModel } from '../model/tvTypes';
 import { resolveTvVisualTheme } from '../model/tvVisualTheme';
+import { resolveTvTouchGesture } from '../model/tvTouchGesture';
 import { resolveTvSongCoverUrl, TV_COVER_SIZE } from '../services/tvPlaybackSource';
 
 export const TvPlayer = ({
     player,
     controlsOpen,
     constrained,
+    isCar = false,
     onOpenQueue,
     onOpenEffects,
+    onRevealControls,
     inert,
 }: {
     player: TvPlayerModel;
     controlsOpen: boolean;
     constrained: boolean;
+    isCar?: boolean;
     onOpenQueue: () => void;
-    onOpenEffects: () => void;
+    onOpenEffects?: () => void;
+    onRevealControls: () => void;
     inert: boolean;
 }) => {
     const { t } = useTranslation();
+    const touchStartRef = useRef<{
+        pointerId: number;
+        x: number;
+        y: number;
+        startedOnControl: boolean;
+    } | null>(null);
     const song = player.currentSong;
     const coverUrl = resolveTvSongCoverUrl(song, TV_COVER_SIZE.backdrop);
     const artist = song ? getSongArtistLabel(song) : '';
@@ -56,6 +67,45 @@ export const TvPlayer = ({
         mode: backgroundMode,
         transparent: false,
     }), [backgroundMode, sharedBackgroundConfig]);
+    const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+        if (!isCar) {
+            onRevealControls();
+            return;
+        }
+        if (!event.isPrimary || (event.pointerType === 'mouse' && event.button !== 0)) return;
+        const target = event.target instanceof Element ? event.target : null;
+        touchStartRef.current = {
+            pointerId: event.pointerId,
+            x: event.clientX,
+            y: event.clientY,
+            startedOnControl: Boolean(target?.closest(
+                'button, a, input, select, textarea, [role="dialog"]',
+            )),
+        };
+        onRevealControls();
+    };
+    const handlePointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
+        if (!isCar) return;
+        const start = touchStartRef.current;
+        touchStartRef.current = null;
+        if (!start || start.pointerId !== event.pointerId || start.startedOnControl) return;
+        const gesture = resolveTvTouchGesture(
+            event.clientX - start.x,
+            event.clientY - start.y,
+        );
+        if (gesture === 'next') {
+            player.next();
+            onRevealControls();
+        } else if (gesture === 'previous') {
+            player.skipPrevious();
+            onRevealControls();
+        } else if (gesture === 'tap') {
+            onRevealControls();
+        }
+    };
+    const handlePointerCancel = () => {
+        touchStartRef.current = null;
+    };
 
     return (
         <div
@@ -63,6 +113,9 @@ export const TvPlayer = ({
             data-tv-layer="player"
             data-tv-player-chrome={controlsOpen ? 'visible' : 'hidden'}
             className="tv-page tv-player-page"
+            onPointerDown={handlePointerDown}
+            onPointerUp={handlePointerUp}
+            onPointerCancel={handlePointerCancel}
             inert={inert || undefined}
         >
             <TvBackdrop
@@ -119,9 +172,9 @@ export const TvPlayer = ({
                     constrained={constrained}
                     onOpenQueue={onOpenQueue}
                     onOpenEffects={onOpenEffects}
+                    onPrevious={isCar ? player.skipPrevious : player.previous}
                 />
             )}
         </div>
     );
 };
-

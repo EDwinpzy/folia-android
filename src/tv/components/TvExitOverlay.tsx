@@ -2,6 +2,7 @@
 
 import { Minimize2, Play, Power } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { TvOverlayCloseButton } from './TvOverlayCloseButton';
 
 export const TvExitOverlay = ({
     isPlaying,
@@ -9,12 +10,14 @@ export const TvExitOverlay = ({
     canExit,
     onBackground,
     onExit,
+    onClose,
 }: {
     isPlaying: boolean;
     canBackground: boolean;
     canExit: boolean;
     onBackground: () => void;
     onExit: () => void;
+    onClose?: () => void;
 }) => {
     const { t } = useTranslation();
 
@@ -26,6 +29,11 @@ export const TvExitOverlay = ({
                 aria-modal="true"
                 aria-labelledby="tv-exit-title"
             >
+                {onClose && (
+                    <div className="tv-exit-close">
+                        <TvOverlayCloseButton onClose={onClose} />
+                    </div>
+                )}
                 <div className="tv-exit-body">
                     <span className="tv-overlay-icon"><Power size={22} /></span>
                     <h2 id="tv-exit-title">{t('tv.exit.title')}</h2>

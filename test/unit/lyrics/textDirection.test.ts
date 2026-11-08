@@ -7,6 +7,7 @@ describe('resolveLyricTextDirection', () => {
         expect(resolveLyricTextDirection('ئەگەر شامال يەلپۈپ ئۆتسە')).toBe('rtl');
         expect(resolveLyricTextDirection('مرحبا بالعالم')).toBe('rtl');
         expect(resolveLyricTextDirection('שלום עולם')).toBe('rtl');
+        expect(resolveLyricTextDirection('\u{10E80}\u{10E81}')).toBe('rtl');
     });
     it('reads Latin, CJK and empty text as ltr', () => {
         expect(resolveLyricTextDirection('hello world')).toBe('ltr');

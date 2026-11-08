@@ -5,20 +5,31 @@ import { useTranslation } from 'react-i18next';
 import { getSongArtistLabel } from '../../services/onlineMusic/songMetadata';
 import type { SongResult } from '../../types';
 import { resolveTvSongCoverUrl, TV_COVER_SIZE } from '../services/tvPlaybackSource';
+import { TvOverlayCloseButton } from './TvOverlayCloseButton';
+import { dismissTvOverlayOnBackdrop } from './tvOverlayDismiss';
 
 export const TvQueueOverlay = ({
     queue,
     currentIndex,
     onPlay,
+    onClose,
+    showCloseButton = true,
 }: {
     queue: SongResult[];
     currentIndex: number;
     onPlay: (index: number) => void;
+    onClose?: () => void;
+    showCloseButton?: boolean;
 }) => {
     const { t } = useTranslation();
 
     return (
-        <section id="tv-layer-queue" data-tv-layer="queue" className="tv-overlay tv-queue-overlay">
+        <section
+            id="tv-layer-queue"
+            data-tv-layer="queue"
+            className="tv-overlay tv-queue-overlay"
+            onClick={dismissTvOverlayOnBackdrop(onClose)}
+        >
             <div
                 className="tv-overlay-panel tv-queue-panel"
                 role="dialog"
@@ -32,6 +43,7 @@ export const TvQueueOverlay = ({
                             <h2 id="tv-queue-title">{t('tv.player.queue')}</h2>
                         </span>
                     </div>
+                    {onClose && showCloseButton && <TvOverlayCloseButton onClose={onClose} />}
                 </header>
                 <div
                     className="tv-overlay-list"
@@ -72,4 +84,3 @@ export const TvQueueOverlay = ({
         </section>
     );
 };
-

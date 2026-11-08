@@ -10,6 +10,7 @@ import {
     VISUALIZER_BACKGROUND_REGISTRY,
     getVisualizerBackgroundModeLabel,
 } from '../../components/visualizer/backgrounds/registry';
+import { TvOverlayCloseButton } from './TvOverlayCloseButton';
 
 // src/tv/components/TvEffectsOverlay.tsx
 // Both effect families stay on one page and use the same D-pad geometry as the rest of TV.
@@ -18,11 +19,13 @@ export const TvEffectsOverlay = ({
     backgroundMode,
     onVisualizerModeChange,
     onBackgroundModeChange,
+    onClose,
 }: {
     visualizerMode: VisualizerMode;
     backgroundMode: VisualizerBackgroundMode;
     onVisualizerModeChange: (mode: VisualizerMode) => void;
     onBackgroundModeChange: (mode: VisualizerBackgroundMode) => void;
+    onClose?: () => void;
 }) => {
     const { t } = useTranslation();
 
@@ -41,6 +44,7 @@ export const TvEffectsOverlay = ({
                             <h2 id="tv-effects-title">{t('tv.effects.title')}</h2>
                         </span>
                     </div>
+                    {onClose && <TvOverlayCloseButton onClose={onClose} />}
                 </header>
 
                 <div className="tv-effects-body">

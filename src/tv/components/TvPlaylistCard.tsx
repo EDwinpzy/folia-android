@@ -44,4 +44,3 @@ export const TvPlaylistCard = memo(({
         </button>
     );
 });
-

@@ -23,6 +23,7 @@ describe('TV route layers', () => {
     it('closes one layer at a time and opens the leave choice at the home root', () => {
         expect(resolveTvBackRoute({ page: 'home', overlay: 'login' })).toEqual(TV_HOME_ROUTE);
         expect(resolveTvBackRoute({ page: 'home', overlay: 'collection' })).toEqual(TV_HOME_ROUTE);
+        expect(resolveTvBackRoute({ page: 'home', overlay: 'queue' })).toEqual(TV_HOME_ROUTE);
         expect(resolveTvBackRoute({ page: 'home', overlay: 'exit' })).toEqual(TV_HOME_ROUTE);
         expect(resolveTvBackRoute({ page: 'player', overlay: 'controls' })).toEqual({
             page: 'player',
@@ -41,6 +42,18 @@ describe('TV route layers', () => {
             page: 'home',
             overlay: 'exit',
         });
+    });
+
+    it('lets the car surface hand the root Back press to Android instead of opening an exit chooser', () => {
+        expect(resolveTvBackRoute(TV_HOME_ROUTE, { offerExit: false })).toBeNull();
+        expect(resolveTvBackRoute(
+            { page: 'player', overlay: null },
+            { offerExit: false },
+        )).toEqual(TV_HOME_ROUTE);
+        expect(resolveTvBackRoute(
+            { page: 'home', overlay: 'search' },
+            { offerExit: false },
+        )).toEqual(TV_HOME_ROUTE);
     });
 
     it('focuses the effects panel only when the player controls still own the foreground', () => {

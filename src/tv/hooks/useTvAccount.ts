@@ -110,4 +110,3 @@ export const useTvAccount = ({ onProviderSwitch }: { onProviderSwitch?: () => vo
         logout,
     };
 };
-

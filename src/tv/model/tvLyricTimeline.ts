@@ -18,4 +18,3 @@ export const findTvActiveLineIndex = (lines: readonly Line[], time: number): num
     }
     return match;
 };
-

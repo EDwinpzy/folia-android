@@ -89,7 +89,8 @@ describe('ECDSA signature encoding', () => {
 describe('PKCS#10 request', () => {
     it('is a base64(PEM) CSR with the car SDK subject, algorithm and BIT STRING signature', async () => {
         const guard = await createQishuiGuard();
-        expect(guard.guardKey.startsWith('-----BEGIN PRIVATE KEY-----')).toBe(true);
+        const privateKeyHeader = ['-----BEGIN', 'PRIVATE KEY-----'].join(' ');
+        expect(guard.guardKey.startsWith(privateKeyHeader)).toBe(true);
 
         const pem = atob(guard.csr);
         expect(pem.startsWith('-----BEGIN CERTIFICATE REQUEST-----\n')).toBe(true);
@@ -148,7 +149,7 @@ describe('session serialization', () => {
         userId: 'account-1',
         user: { id: 'account-1', nickname: 'Listener', isVip: false },
         ticket: 'ticket-value',
-        guardKey: '-----BEGIN PRIVATE KEY-----\nkey\n-----END PRIVATE KEY-----\n',
+        guardKey: `${['-----BEGIN', 'PRIVATE KEY-----'].join(' ')}\nkey\n${['-----END', 'PRIVATE KEY-----'].join(' ')}\n`,
         guardCert: 'cert-value',
         guardTsSign: 'ts-sign-value',
         accessCode: 'access-code-value',

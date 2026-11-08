@@ -4,24 +4,29 @@ import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
-import android.app.Service;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.net.Uri;
 import android.net.wifi.WifiManager;
+import android.media.MediaDescription;
 import android.media.MediaMetadata;
+import android.media.browse.MediaBrowser;
 import android.media.session.MediaSession;
 import android.media.session.PlaybackState;
 import android.os.Build;
+import android.os.Bundle;
 import android.os.Handler;
-import android.os.IBinder;
 import android.os.Looper;
 import android.os.PowerManager;
 import android.os.SystemClock;
-
-import androidx.annotation.Nullable;
+import android.service.media.MediaBrowserService;
 
 import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -32,13 +37,19 @@ import okhttp3.Request;
 import okhttp3.Response;
 import okhttp3.ResponseBody;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 import top.izuna.foliamajor.coloros.ColorOsLyricBridge;
 
-public class FoliaPlaybackService extends Service {
+public class FoliaPlaybackService extends MediaBrowserService {
     private static final String CHANNEL_ID = "folia_playback";
     private static final int NOTIFICATION_ID = 31009;
+    private static final String BROWSER_ROOT_ID = "__ROOT__";
+    private static final String BROWSER_CURRENT_ID = "current";
+    private static final String BROWSER_QUEUE_ID = "queue";
+    private static final String BROWSER_QUEUE_ITEM_PREFIX = "queue:";
+    private static final int MAX_BROWSER_QUEUE_ITEMS = 300;
     public static final String ACTION_REFRESH_METADATA = "top.izuna.foliamajor.action.REFRESH_METADATA";
     private MediaSession mediaSession;
     private final ExecutorService artworkExecutor = Executors.newSingleThreadExecutor();
@@ -54,10 +65,11 @@ public class FoliaPlaybackService extends Service {
     private volatile String cachedAlbum = "";
     private volatile String cachedCoverUrl = "";
     private volatile String cachedSongKey = "";
-    private volatile String cachedLaunchTarget = "phone";
+    private volatile String cachedLaunchTarget = "auto";
     private volatile long cachedDurationMs = 0L;
     private volatile long cachedPositionMs = 0L;
     private volatile boolean cachedPlaying = false;
+    private volatile List<QueuedTrack> cachedQueue = Collections.emptyList();
     private static volatile boolean running = false;
     private PowerManager.WakeLock wakeLock;
     private WifiManager.WifiLock wifiLock;
@@ -80,6 +92,34 @@ public class FoliaPlaybackService extends Service {
         }
     };
 
+    private static final class QueuedTrack {
+        final int sourceIndex;
+        final String title;
+        final String artist;
+        final String album;
+        final String coverUrl;
+        final String songKey;
+        final long durationMs;
+
+        QueuedTrack(
+            int sourceIndex,
+            String title,
+            String artist,
+            String album,
+            String coverUrl,
+            String songKey,
+            long durationMs
+        ) {
+            this.sourceIndex = sourceIndex;
+            this.title = title;
+            this.artist = artist;
+            this.album = album;
+            this.coverUrl = coverUrl;
+            this.songKey = songKey;
+            this.durationMs = durationMs;
+        }
+    }
+
     @Override
     public void onCreate() {
         super.onCreate();
@@ -92,7 +132,21 @@ public class FoliaPlaybackService extends Service {
             @Override public void onSkipToNext() { emit("next"); }
             @Override public void onSkipToPrevious() { emit("previous"); }
             @Override public void onStop() { emit("stop"); }
+            @Override public void onSeekTo(long position) { emitSeek(position); }
+            @Override public void onSkipToQueueItem(long id) { handleQueueSelection((int) id); }
+            @Override public void onPlayFromSearch(String query, Bundle extras) {
+                handlePlayFromSearch(query);
+            }
+            @Override public void onPlayFromMediaId(String mediaId, Bundle extras) {
+                handlePlayFromMediaId(mediaId);
+            }
         });
+        mediaSession.setFlags(
+            MediaSession.FLAG_HANDLES_MEDIA_BUTTONS
+                | MediaSession.FLAG_HANDLES_TRANSPORT_CONTROLS
+        );
+        mediaSession.setSessionActivity(buildSessionActivityIntent());
+        setSessionToken(mediaSession.getSessionToken());
         mediaSession.setActive(true);
         PowerManager powerManager = (PowerManager) getSystemService(POWER_SERVICE);
         if (powerManager != null) {
@@ -135,6 +189,9 @@ public class FoliaPlaybackService extends Service {
         cachedSongKey = intent.getStringExtra("songKey");
         String launchTarget = intent.getStringExtra("launchTarget");
         if (launchTarget != null && !launchTarget.isEmpty()) cachedLaunchTarget = launchTarget;
+        if (mediaSession != null) mediaSession.setSessionActivity(buildSessionActivityIntent());
+        String queueJson = intent.getStringExtra("queue");
+        if (queueJson != null) updateBrowseQueue(queueJson);
         cachedPlaying = intent.getBooleanExtra("playing", false);
         cachedPositionMs = intent.getLongExtra("position", 0);
         cachedDurationMs = intent.getLongExtra("duration", 0);
@@ -256,11 +313,20 @@ public class FoliaPlaybackService extends Service {
                 PlaybackState.ACTION_PLAY
                     | PlaybackState.ACTION_PAUSE
                     | PlaybackState.ACTION_PLAY_PAUSE
+                    | PlaybackState.ACTION_PLAY_FROM_MEDIA_ID
+                    | PlaybackState.ACTION_PLAY_FROM_SEARCH
                     | PlaybackState.ACTION_SKIP_TO_NEXT
                     | PlaybackState.ACTION_SKIP_TO_PREVIOUS
+                    | PlaybackState.ACTION_SKIP_TO_QUEUE_ITEM
                     | PlaybackState.ACTION_SEEK_TO
+                    | PlaybackState.ACTION_STOP
             )
-            .setState(playing ? PlaybackState.STATE_PLAYING : PlaybackState.STATE_PAUSED, position, playing ? 1f : 0f);
+            .setState(
+                playing ? PlaybackState.STATE_PLAYING : PlaybackState.STATE_PAUSED,
+                position,
+                playing ? 1f : 0f,
+                SystemClock.elapsedRealtime()
+            );
         if (ColorOsLyricBridge.hasTranslationFor(songKey)) {
             builder.addCustomAction(new PlaybackState.CustomAction.Builder(
                 ColorOsLyricBridge.ACTION_TOGGLE_TRANSLATION,
@@ -282,7 +348,7 @@ public class FoliaPlaybackService extends Service {
         boolean playing,
         Bitmap artwork
     ) {
-        Class<?> activityClass = "tv".equals(cachedLaunchTarget) ? TvActivity.class : MainActivity.class;
+        Class<?> activityClass = activityClassForTarget(cachedLaunchTarget);
         Intent activityIntent = new Intent(this, activityClass)
             .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         PendingIntent contentIntent = PendingIntent.getActivity(
@@ -326,6 +392,223 @@ public class FoliaPlaybackService extends Service {
                 .setShowActionsInCompactView(0, 1, 2));
         if (artwork != null) builder.setLargeIcon(artwork);
         return builder.build();
+    }
+
+    private Class<?> activityClassForTarget(String target) {
+        if ("car".equals(target)) return CarActivity.class;
+        if ("tv".equals(target)) return TvActivity.class;
+        if (EntryActivity.isAutomotiveSurface(this)) return CarActivity.class;
+        if (getPackageManager().hasSystemFeature(PackageManager.FEATURE_LEANBACK)) {
+            return TvActivity.class;
+        }
+        return MainActivity.class;
+    }
+
+    private PendingIntent buildSessionActivityIntent() {
+        Intent activityIntent = new Intent(this, activityClassForTarget(cachedLaunchTarget))
+            .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        return PendingIntent.getActivity(
+            this,
+            4,
+            activityIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+        );
+    }
+
+    /**
+     * The WebView owns audio decoding, but it publishes its queue snapshot through the same
+     * foreground-service start command as the current metadata. Keeping that snapshot here lets
+     * Android media browser clients enumerate and select queue items without a second queue state.
+     */
+    private void updateBrowseQueue(String rawQueue) {
+        List<QueuedTrack> parsed = new ArrayList<>();
+        if (rawQueue != null && !rawQueue.isEmpty()) {
+            try {
+                JSONArray rows = new JSONArray(rawQueue);
+                int limit = Math.min(rows.length(), MAX_BROWSER_QUEUE_ITEMS);
+                for (int rowIndex = 0; rowIndex < limit; rowIndex += 1) {
+                    JSONObject row = rows.optJSONObject(rowIndex);
+                    if (row == null) continue;
+                    String title = row.optString("title", "").trim();
+                    if (title.isEmpty()) continue;
+                    parsed.add(new QueuedTrack(
+                        row.optInt("index", rowIndex),
+                        title,
+                        row.optString("artist", ""),
+                        row.optString("album", ""),
+                        row.optString("coverUrl", ""),
+                        row.optString("songKey", ""),
+                        Math.max(0L, row.optLong("duration", 0L))
+                    ));
+                }
+            } catch (Exception error) {
+                recordServiceLifecycle(
+                    "browser-queue-error",
+                    error.getClass().getSimpleName() + ": " + error.getMessage()
+                );
+            }
+        }
+        cachedQueue = Collections.unmodifiableList(parsed);
+        if (mediaSession != null) mediaSession.setQueue(buildSessionQueue());
+        notifyChildrenChanged(BROWSER_ROOT_ID);
+        notifyChildrenChanged(BROWSER_QUEUE_ID);
+    }
+
+    private List<MediaSession.QueueItem> buildSessionQueue() {
+        List<MediaSession.QueueItem> items = new ArrayList<>();
+        for (QueuedTrack track : cachedQueue) {
+            items.add(new MediaSession.QueueItem(
+                buildTrackDescription(track, BROWSER_QUEUE_ITEM_PREFIX + track.sourceIndex),
+                track.sourceIndex
+            ));
+        }
+        return items;
+    }
+
+    private MediaDescription buildTrackDescription(QueuedTrack track, String mediaId) {
+        Bundle extras = new Bundle();
+        extras.putString(MediaMetadata.METADATA_KEY_TITLE, track.title);
+        extras.putString(MediaMetadata.METADATA_KEY_ARTIST, track.artist);
+        extras.putString(MediaMetadata.METADATA_KEY_ALBUM, track.album);
+        extras.putLong(MediaMetadata.METADATA_KEY_DURATION, track.durationMs);
+        MediaDescription.Builder builder = new MediaDescription.Builder()
+            .setMediaId(mediaId)
+            .setTitle(track.title)
+            .setSubtitle(track.artist)
+            .setExtras(extras);
+        if (track.coverUrl.startsWith("http://") || track.coverUrl.startsWith("https://")) {
+            builder.setIconUri(Uri.parse(track.coverUrl));
+        }
+        return builder.build();
+    }
+
+    private MediaDescription buildCurrentDescription() {
+        Bundle extras = new Bundle();
+        extras.putString(MediaMetadata.METADATA_KEY_TITLE, cachedTitle);
+        extras.putString(MediaMetadata.METADATA_KEY_ARTIST, cachedArtist);
+        extras.putString(MediaMetadata.METADATA_KEY_ALBUM, cachedAlbum);
+        extras.putLong(MediaMetadata.METADATA_KEY_DURATION, cachedDurationMs);
+        MediaDescription.Builder builder = new MediaDescription.Builder()
+            .setMediaId(BROWSER_CURRENT_ID)
+            .setTitle(cachedTitle)
+            .setSubtitle(cachedArtist)
+            .setExtras(extras);
+        if (cachedCoverUrl.startsWith("http://") || cachedCoverUrl.startsWith("https://")) {
+            builder.setIconUri(Uri.parse(cachedCoverUrl));
+        }
+        return builder.build();
+    }
+
+    @Override
+    public BrowserRoot onGetRoot(String clientPackageName, int clientUid, Bundle rootHints) {
+        return new BrowserRoot(BROWSER_ROOT_ID, null);
+    }
+
+    @Override
+    public void onLoadChildren(
+        String parentId,
+        Result<List<MediaBrowser.MediaItem>> result
+    ) {
+        if (BROWSER_ROOT_ID.equals(parentId)) {
+            List<MediaBrowser.MediaItem> children = new ArrayList<>();
+            if (!cachedTitle.trim().isEmpty()) {
+                children.add(new MediaBrowser.MediaItem(
+                    buildCurrentDescription(),
+                    MediaBrowser.MediaItem.FLAG_PLAYABLE
+                ));
+            }
+            Bundle queueExtras = new Bundle();
+            queueExtras.putLong(
+                MediaMetadata.METADATA_KEY_DURATION,
+                cachedQueue.isEmpty() ? 0L : cachedDurationMs
+            );
+            children.add(new MediaBrowser.MediaItem(
+                new MediaDescription.Builder()
+                    .setMediaId(BROWSER_QUEUE_ID)
+                    .setTitle("Play queue")
+                    .setSubtitle(cachedQueue.size() + " tracks")
+                    .setExtras(queueExtras)
+                    .build(),
+                MediaBrowser.MediaItem.FLAG_BROWSABLE
+            ));
+            result.sendResult(children);
+            return;
+        }
+
+        if (BROWSER_QUEUE_ID.equals(parentId)) {
+            List<MediaBrowser.MediaItem> children = new ArrayList<>();
+            for (QueuedTrack track : cachedQueue) {
+                children.add(new MediaBrowser.MediaItem(
+                    buildTrackDescription(track, BROWSER_QUEUE_ITEM_PREFIX + track.sourceIndex),
+                    MediaBrowser.MediaItem.FLAG_PLAYABLE
+                ));
+            }
+            result.sendResult(children);
+            return;
+        }
+
+        result.sendResult(Collections.emptyList());
+    }
+
+    private void handlePlayFromSearch(String query) {
+        String normalized = VoicePlayIntents.normalize(query);
+        if (normalized == null) {
+            FoliaNativePlugin.offerVoiceResumeRequest();
+        } else {
+            FoliaNativePlugin.offerVoicePlayRequest(normalized);
+        }
+        openTargetActivity(cachedLaunchTarget);
+    }
+
+    private void handlePlayFromMediaId(String mediaId) {
+        if (mediaId == null) return;
+        if (BROWSER_CURRENT_ID.equals(mediaId)) {
+            emit("play");
+            openTargetActivity(cachedLaunchTarget);
+            return;
+        }
+        if (mediaId.startsWith(BROWSER_QUEUE_ITEM_PREFIX)) {
+            try {
+                int sourceIndex = Integer.parseInt(
+                    mediaId.substring(BROWSER_QUEUE_ITEM_PREFIX.length())
+                );
+                handleQueueSelection(sourceIndex);
+            } catch (NumberFormatException ignored) {
+                // Media IDs are app-owned; ignore malformed IDs from stale browser sessions.
+            }
+            return;
+        }
+        if (BROWSER_QUEUE_ID.equals(mediaId)) openTargetActivity(cachedLaunchTarget);
+    }
+
+    private void handleQueueSelection(int sourceIndex) {
+        if (sourceIndex < 0) return;
+        FoliaNativePlugin.offerQueuePlayRequest(sourceIndex);
+        openTargetActivity(cachedLaunchTarget);
+    }
+
+    private void emitSeek(long position) {
+        if (position < 0L) return;
+        FoliaNativePlugin.emitMediaAction("seek", position);
+    }
+
+    private void openTargetActivity(String target) {
+        Class<?> activityClass = activityClassForTarget(target);
+        mainHandler.post(() -> {
+            try {
+                startActivity(new Intent(this, activityClass)
+                    .addFlags(
+                        Intent.FLAG_ACTIVITY_NEW_TASK
+                            | Intent.FLAG_ACTIVITY_SINGLE_TOP
+                            | Intent.FLAG_ACTIVITY_CLEAR_TOP
+                    ));
+            } catch (Exception error) {
+                recordServiceLifecycle(
+                    "browser-open-error",
+                    error.getClass().getSimpleName() + ": " + error.getMessage()
+                );
+            }
+        });
     }
 
     private void loadArtwork(String value, ArtworkCallback callback) {
@@ -497,9 +780,4 @@ public class FoliaPlaybackService extends Service {
         super.onDestroy();
     }
 
-    @Nullable
-    @Override
-    public IBinder onBind(Intent intent) {
-        return null;
-    }
 }

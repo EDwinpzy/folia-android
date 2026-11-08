@@ -7,6 +7,7 @@
 ## 入门与构建
 
 - [Android 移植与构建](../ANDROID_PORT.md)：Capacitor 容器、构建步骤和平台桥。
+- [Android 车机版](android-car.md)：车机入口、系统媒体浏览器、默认播放器边界和验证范围。
 - [技术与开发说明](technical.md)：本地开发、环境变量、Web 部署、Stage API 和常用脚本。
 - [代码地图](CODEMAP.md)：由 TypeScript 编译器生成的模块分布、枢纽模块和动态注册点；生成规则见文件头。
 

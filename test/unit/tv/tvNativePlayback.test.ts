@@ -4,6 +4,7 @@ import {
     buildTvNativePlaybackIdentity,
     buildTvNativePlaybackPayload,
     resolveTvNativeMediaAction,
+    resolveTvNativeMediaActionForTarget,
 } from '../../../src/tv/services/tvNativePlayback';
 
 // test/unit/tv/tvNativePlayback.test.ts
@@ -21,9 +22,11 @@ describe('TV native playback bridge', () => {
     it('builds a TV-owned native session snapshot', () => {
         const payload = buildTvNativePlaybackPayload({
             song,
+            queue: [song],
             status: 'playing',
             positionSeconds: 12.4,
             durationSeconds: 215,
+            launchTarget: 'car',
         });
 
         expect(payload).toEqual(expect.objectContaining({
@@ -35,9 +38,16 @@ describe('TV native playback bridge', () => {
             playing: true,
             position: 12400,
             duration: 215000,
-            launchTarget: 'tv',
+            launchTarget: 'car',
             requestNotificationPermission: false,
         }));
+        expect(payload?.queue).toEqual([expect.objectContaining({
+            index: 0,
+            title: '夜航星',
+            artist: '测试歌手',
+            songKey: 'online:netease:42',
+            duration: 215000,
+        })]);
     });
 
     it('does not publish or restart the service without a song', () => {
@@ -70,10 +80,18 @@ describe('TV native playback bridge', () => {
     it('keeps native media actions inside the TV vocabulary', () => {
         expect(resolveTvNativeMediaAction('play')).toBe('play');
         expect(resolveTvNativeMediaAction('pause')).toBe('pause');
+        expect(resolveTvNativeMediaAction('toggle')).toBe('toggle');
         expect(resolveTvNativeMediaAction('next')).toBe('next');
         expect(resolveTvNativeMediaAction('previous')).toBe('previous');
         expect(resolveTvNativeMediaAction('stop')).toBe('stop');
+        expect(resolveTvNativeMediaAction('seek')).toBe('seek');
         expect(resolveTvNativeMediaAction('seekto')).toBeNull();
         expect(resolveTvNativeMediaAction(undefined)).toBeNull();
+    });
+
+    it('maps car previous to a real track skip without changing TV behavior', () => {
+        expect(resolveTvNativeMediaActionForTarget('previous', 'car')).toBe('skipPrevious');
+        expect(resolveTvNativeMediaActionForTarget('previous', 'tv')).toBe('previous');
+        expect(resolveTvNativeMediaActionForTarget('next', 'car')).toBe('next');
     });
 });

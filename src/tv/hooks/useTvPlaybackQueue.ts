@@ -58,6 +58,7 @@ export type TvPlaybackQueueModel = {
     previous: () => void;
     skipPrevious: () => void;
     seekBy: (deltaSeconds: number) => void;
+    seekTo: (seconds: number) => void;
     setVisualizerMode: (mode: VisualizerMode) => void;
     setBackgroundMode: (mode: VisualizerBackgroundMode) => void;
 };
@@ -74,7 +75,7 @@ export const useTvPlaybackQueue = (transport: TvAudioTransport): TvPlaybackQueue
     });
     const [queue, setQueue] = useState<SongResult[]>([]);
     const [currentIndex, setCurrentIndex] = useState(-1);
-    const [currentSong, setCurrentSong] = useState<SongResult | null>(null);
+    const [tvSong, setTvSong] = useState<SongResult | null>(null);
     const [lyrics, setLyrics] = useState<LyricData | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [isLyricsLoading, setIsLyricsLoading] = useState(false);
@@ -84,11 +85,20 @@ export const useTvPlaybackQueue = (transport: TvAudioTransport): TvPlaybackQueue
     );
     const queueRef = useRef<SongResult[]>([]);
     const indexRef = useRef(-1);
-    const currentSongRef = useRef<SongResult | null>(null);
+    const tvSongRef = useRef<SongResult | null>(null);
     const requestIdRef = useRef(0);
     const restoredRef = useRef(false);
     const mountedRef = useRef(true);
-    const { reset, pause, resume, seekBy: seekTransport, loadSource, hasSource, fail } = transport;
+    const {
+        reset,
+        pause,
+        resume,
+        seekBy: seekTransport,
+        seekTo: seekTransportTo,
+        loadSource,
+        hasSource,
+        fail,
+    } = transport;
 
     const commitQueue = useCallback((songs: SongResult[], index: number) => {
         queueRef.current = songs;
@@ -106,8 +116,8 @@ export const useTvPlaybackQueue = (transport: TvAudioTransport): TvPlaybackQueue
         const requestId = ++requestIdRef.current;
         const isCurrent = () => requestIdRef.current === requestId;
         commitQueue(songs, boundedIndex);
-        currentSongRef.current = song;
-        setCurrentSong(song);
+        tvSongRef.current = song;
+        setTvSong(song);
         setLyrics(null);
         setError(null);
         setIsLyricsLoading(false);
@@ -121,8 +131,8 @@ export const useTvPlaybackQueue = (transport: TvAudioTransport): TvPlaybackQueue
             try {
                 const resolved = await loadTvSongAudio(song, audioQuality, isCurrent);
                 if (!isCurrent()) return;
-                currentSongRef.current = resolved.song;
-                setCurrentSong(resolved.song);
+                tvSongRef.current = resolved.song;
+                setTvSong(resolved.song);
                 retireBlobUrl(resolved.audioSrc);
                 loadSource(resolved.audioSrc, true);
 
@@ -153,7 +163,7 @@ export const useTvPlaybackQueue = (transport: TvAudioTransport): TvPlaybackQueue
     }, [audioQuality, commitQueue, fail, loadSource, reset, userId]);
 
     const resumeCurrent = useCallback(() => {
-        if (!currentSongRef.current) return;
+        if (!tvSongRef.current) return;
         if (hasSource && queueRef.current.length > 0) {
             void resume();
             return;
@@ -203,6 +213,10 @@ export const useTvPlaybackQueue = (transport: TvAudioTransport): TvPlaybackQueue
         seekTransport(deltaSeconds);
     }, [seekTransport]);
 
+    const seekTo = useCallback((seconds: number) => {
+        seekTransportTo(seconds);
+    }, [seekTransportTo]);
+
     const setVisualizerMode = useCallback((mode: VisualizerMode) => {
         if (!isBuiltinVisualizerMode(mode)) return;
         setVisualizerModeState(mode);
@@ -229,7 +243,7 @@ export const useTvPlaybackQueue = (transport: TvAudioTransport): TvPlaybackQueue
             if (
                 !mountedRef.current
                 || !lastSong
-                || currentSongRef.current
+                || tvSongRef.current
                 || queueRef.current.length > 0
             ) return;
             const restoredQueue = Array.isArray(lastQueue) && lastQueue.length > 0 ? lastQueue : [lastSong];
@@ -239,8 +253,8 @@ export const useTvPlaybackQueue = (transport: TvAudioTransport): TvPlaybackQueue
                     : song.id === lastSong.id
             )));
             commitQueue(restoredQueue, restoredIndex);
-            currentSongRef.current = lastSong;
-            setCurrentSong(lastSong);
+            tvSongRef.current = lastSong;
+            setTvSong(lastSong);
         }).catch(() => undefined);
     }, [commitQueue]);
 
@@ -254,7 +268,7 @@ export const useTvPlaybackQueue = (transport: TvAudioTransport): TvPlaybackQueue
     }, [pause]);
 
     return {
-        currentSong,
+        currentSong: tvSong,
         currentIndex,
         queue,
         lyrics,
@@ -272,8 +286,8 @@ export const useTvPlaybackQueue = (transport: TvAudioTransport): TvPlaybackQueue
         previous,
         skipPrevious,
         seekBy,
+        seekTo,
         setVisualizerMode,
         setBackgroundMode,
     };
 };
-

@@ -10,7 +10,7 @@ type NativeVoicePlayPlugin = {
         eventName: string,
         listener: () => void,
     ) => Promise<{ remove: () => Promise<void> }> | { remove: () => Promise<void> };
-    consumeVoicePlayRequest: () => Promise<{ query?: string } | undefined>;
+    consumeVoicePlayRequest: () => Promise<{ query?: string; action?: string } | undefined>;
 };
 
 const getPlugin = (): NativeVoicePlayPlugin | null => {
@@ -36,11 +36,15 @@ const getPlugin = (): NativeVoicePlayPlugin | null => {
  */
 export const useTvVoicePlay = ({
     onPlayTracks,
+    onResume,
 }: {
     onPlayTracks: (songs: SongResult[], startIndex: number) => void;
+    onResume: () => void;
 }): void => {
     const onPlayTracksRef = useRef(onPlayTracks);
     onPlayTracksRef.current = onPlayTracks;
+    const onResumeRef = useRef(onResume);
+    onResumeRef.current = onResume;
     const requestRef = useRef(0);
 
     const playQuery = useCallback(async (rawQuery: string) => {
@@ -77,7 +81,12 @@ export const useTvVoicePlay = ({
         const consume = async () => {
             try {
                 const request = await plugin.consumeVoicePlayRequest();
-                if (!disposed && request?.query) await playQuery(request.query);
+                if (disposed || !request) return;
+                if (request.action === 'resume') {
+                    onResumeRef.current();
+                    return;
+                }
+                if (request.query) await playQuery(request.query);
             } catch (error) {
                 console.warn('[TV Voice] Failed to consume song request', error);
             }

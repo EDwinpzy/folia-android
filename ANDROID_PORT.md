@@ -85,8 +85,16 @@ android/app/build/outputs/apk/debug/app-debug.apk
 - QQ 收藏、专辑、歌单逻辑保留
 - 后台播放前台服务
 - 锁屏和通知栏 MediaSession 控制
+- Android 车机横屏入口与驾驶场景控制台
+- MediaBrowserService、媒体浏览器队列和默认音乐应用发现
 - Android MediaStore 本地音乐扫描
 - App 内本地 HTTP 音频流
+
+## Android 车机版
+
+车机版是同 APK 内的独立横屏入口 `car.html` / `src/car/`，原生入口为 `CarActivity`。它通过 `MediaBrowserService`、`MediaSession` 和 `APP_MUSIC` 接入系统媒体选择，并提供本地音乐扫描、导入和默认应用设置引导。
+
+构建与验收边界见 [docs/android-car.md](docs/android-car.md)。
 
 ### QQ 写入接口的形状（合并上游时务必保留）
 

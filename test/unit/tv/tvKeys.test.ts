@@ -46,4 +46,3 @@ describe('isTvSpaceKey', () => {
         expect(isTvSpaceKey({ key: 'Enter', code: 'Enter' })).toBe(false);
     });
 });
-

@@ -51,4 +51,3 @@ describe('findTvActiveLineIndex', () => {
         expect(findTvActiveLineIndex(lines, 99)).toBe(3);
     });
 });
-

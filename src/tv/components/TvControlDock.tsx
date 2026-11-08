@@ -21,11 +21,13 @@ export const TvControlDock = ({
     constrained,
     onOpenQueue,
     onOpenEffects,
+    onPrevious = player.previous,
 }: {
     player: TvPlayerModel;
     constrained: boolean;
     onOpenQueue: () => void;
-    onOpenEffects: () => void;
+    onOpenEffects?: () => void;
+    onPrevious?: () => void;
 }) => {
     const { t } = useTranslation();
     const song = player.currentSong;
@@ -85,7 +87,7 @@ export const TvControlDock = ({
                             type="button"
                             data-tv-focusable="true"
                             data-tv-focus-key="controls-prev"
-                            onClick={player.previous}
+                            onClick={onPrevious}
                             aria-label={t('tv.player.previous')}
                         >
                             <SkipBack size={24} fill="currentColor" />
@@ -123,20 +125,21 @@ export const TvControlDock = ({
                         >
                             <ListMusic size={21} />
                         </button>
-                        <button
-                            type="button"
-                            className="is-utility"
-                            data-tv-focusable="true"
-                            data-tv-focus-key="controls-effects"
-                            onClick={onOpenEffects}
-                            aria-label={t('tv.effects.open')}
-                        >
-                            <Sparkles size={21} />
-                        </button>
+                        {onOpenEffects && (
+                            <button
+                                type="button"
+                                className="is-utility"
+                                data-tv-focusable="true"
+                                data-tv-focus-key="controls-effects"
+                                onClick={onOpenEffects}
+                                aria-label={t('tv.effects.open')}
+                            >
+                                <Sparkles size={21} />
+                            </button>
+                        )}
                     </span>
                 </div>
             </div>
         </section>
     );
 };
-

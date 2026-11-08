@@ -12,6 +12,7 @@ import { selectPonderSettingsSnapshot, usePonderStore } from '../../../../stores
 import { useSettingsModalStore } from '../../../../stores/useSettingsModalStore';
 import { Button, Group, Reveal, Row, Segmented, Select, Toggle, option, type SettingsGroupDef, type SettingsOptionDef } from '../kit';
 import { FoundUpdateRow } from './FoundUpdateRow';
+import { ChinaDrivesRow } from './ChinaDrivesRow';
 import AnalysisModelsGroup from './AnalysisModelsGroup';
 import { useSettingsPage } from './settingsPageContext';
 
@@ -187,6 +188,7 @@ const GeneralPage: React.FC = () => {
                     foot={t(autoUpdateSupported ? 'options.autoUpdateGithubNotice' : 'options.updateCheckGithubNotice')}
                 >
                     <FoundUpdateRow />
+                    <ChinaDrivesRow />
                     <Row
                         option={O.updateCheck}
                         hint={t(updateStatus?.updateCheckSupportReason === 'channel' ? 'options.updateUnsupportedChannel' : 'options.enableUpdateCheckDesc')}

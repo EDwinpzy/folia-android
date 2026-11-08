@@ -4,10 +4,14 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { applyKeepScreenOn, readStoredKeepScreenOn } from '../services/androidKeepScreenOn';
 import { useNativeBackButton } from '../hooks/useNativeBackButton';
 import { canRetryLogin } from '../library/core/account/accountRules';
+import { useCarInitialFocus } from '../car/useCarInitialFocus';
+import { useCarInputModality } from '../car/useCarInputModality';
+import { TvCarToolbar } from '../car/TvCarToolbar';
 import type { SongResult } from '../types';
 import type { ProviderCollection } from '../types/onlineMusic';
 import { TvChunkFailureOverlay } from './components/TvChunkFailureOverlay';
 import { TvChunkLoadBoundary } from './components/TvChunkLoadBoundary';
+import { TvCarRecentPlaysRecorder } from './components/TvCarRecentPlaysRecorder';
 import { TvCollectionOverlay } from './components/TvCollectionOverlay';
 import { TvExitOverlay } from './components/TvExitOverlay';
 import { TvLoginOverlay } from './components/TvLoginOverlay';
@@ -67,10 +71,14 @@ const RESET_FOCUS_MEMORY_LAYERS = [
     'failure',
 ] as const;
 
-export const TvApp = () => {
+export const TvApp = ({ variant = 'tv' }: { variant?: 'tv' | 'car' } = {}) => {
+    const isCar = variant === 'car';
     const player = useTvPlayer();
-    const nativePlayback = useTvNativePlayback(player);
+    const nativePlayback = useTvNativePlayback(player, isCar ? 'car' : 'tv');
     const performanceProfile = useTvPerformanceProfile();
+    const constrained = isCar || performanceProfile.tier === 'constrained';
+    useCarInitialFocus(isCar);
+    useCarInputModality(isCar);
     const account = useTvAccount({ onProviderSwitch: player.pause });
     const library = useTvLibrary(account);
     const trackSkipGestureRef = useRef(createTvTrackSkipGesture());
@@ -113,6 +121,7 @@ export const TvApp = () => {
                 console.warn('[TV App] Player chunk preload failed', error);
                 playerChunkPrefetchFailedRef.current = true;
             });
+            if (isCar) return;
             void loadTvEffectsOverlay().catch(error => {
                 console.warn('[TV App] Effects chunk preload failed', error);
                 effectsChunkPrefetchFailedRef.current = true;
@@ -127,7 +136,7 @@ export const TvApp = () => {
             if (idleHandle !== null) idleWindow.cancelIdleCallback?.(idleHandle);
             if (timeoutHandle !== null) window.clearTimeout(timeoutHandle);
         };
-    }, []);
+    }, [isCar]);
 
     const closeAccount = useCallback(() => {
         if (account.pendingSwitch) account.cancelSwitch(account.pendingSwitch.request.id);
@@ -175,9 +184,14 @@ export const TvApp = () => {
     const touchControls = useTvControlsAutoHide({
         active: !chunkFailure && route.page === 'player' && route.overlay === 'controls',
         onHide: hideControls,
+        timeoutMs: isCar ? 10_000 : undefined,
     });
+    const revealPlayerChromeFromTouch = useCallback(() => {
+        revealPlayerChrome();
+        touchControls();
+    }, [revealPlayerChrome, touchControls]);
     const defaultFocus = useMemo(() => ({
-        home: 'home-hero',
+        home: isCar ? 'car-play' : 'home-hero',
         controls: 'controls-play',
         effects: `effects-lyrics-${player.visualizerMode}`,
         queue: player.currentIndex >= 0
@@ -204,6 +218,7 @@ export const TvApp = () => {
         account.activeProviderId,
         account.login,
         account.pendingSwitch,
+        isCar,
         player.currentIndex,
         player.queue[0]?.id,
         player.visualizerMode,
@@ -222,12 +237,12 @@ export const TvApp = () => {
             closeAccount();
             return true;
         }
-        const next = resolveTvBackRoute(route);
+        const next = resolveTvBackRoute(route, { offerExit: !isCar });
         if (!next) return false;
         if (route.overlay === 'collection') setCollection(null);
         setRoute(next);
         return true;
-    }, [closeAccount, route]);
+    }, [closeAccount, isCar, route]);
 
     const handleAction = useCallback((
         action: TvRemoteAction,
@@ -350,6 +365,10 @@ export const TvApp = () => {
         setRoute(current => ({ ...current, page: 'player', overlay: null }));
     }, []);
 
+    const openCarQueue = useCallback(() => {
+        setRoute(current => ({ ...current, overlay: 'queue' }));
+    }, []);
+
     const openEffects = useCallback(() => {
         if (effectsChunkPrefetchFailedRef.current) {
             setChunkFailure(true);
@@ -404,7 +423,7 @@ export const TvApp = () => {
         openPlayer();
     }, [openPlayer, player]);
 
-    useTvVoicePlay({ onPlayTracks: playTracks });
+    useTvVoicePlay({ onPlayTracks: playTracks, onResume: activateHero });
 
     const openCollection = useCallback((nextCollection: ProviderCollection) => {
         setCollection(nextCollection);
@@ -414,9 +433,10 @@ export const TvApp = () => {
     return (
         <div
             className={`tv-app${route.page === 'player' ? ' is-player' : ''}${
-                performanceProfile.tier === 'constrained' ? ' is-constrained' : ''
-            }`}
+                constrained ? ' is-constrained' : ''
+            }${isCar ? ' is-car' : ''}`}
             data-tv-performance-tier={performanceProfile.tier}
+            data-tv-variant={variant}
         >
             <audio
                 ref={player.audioRef}
@@ -425,6 +445,12 @@ export const TvApp = () => {
                 playsInline
                 crossOrigin="anonymous"
             />
+            {isCar && (
+                <TvCarRecentPlaysRecorder
+                    audioRef={player.audioRef}
+                    currentSong={player.currentSong}
+                />
+            )}
             <TvChunkLoadBoundary
                 key={route.page}
                 onChunkError={reportChunkFailure}
@@ -439,6 +465,15 @@ export const TvApp = () => {
                         onOpenSearch={openSearch}
                         onPlayTracks={playTracks}
                         onOpenCollection={openCollection}
+                        isCar={isCar}
+                        carConsole={isCar ? (
+                            <TvCarToolbar
+                                player={player}
+                                onActivateHero={activateHero}
+                                onOpenPlayer={openPlayer}
+                                onOpenQueue={openCarQueue}
+                            />
+                        ) : undefined}
                         inert={route.overlay !== null}
                     />
                 ) : (
@@ -446,9 +481,11 @@ export const TvApp = () => {
                         <TvPlayer
                             player={player}
                             controlsOpen={route.overlay === 'controls' || route.overlay === 'queue'}
-                            constrained={performanceProfile.tier === 'constrained'}
+                            constrained={constrained}
+                            isCar={isCar}
                             onOpenQueue={() => setRoute(current => ({ ...current, overlay: 'queue' }))}
-                            onOpenEffects={openEffects}
+                            onOpenEffects={isCar ? undefined : openEffects}
+                            onRevealControls={revealPlayerChromeFromTouch}
                             inert={route.overlay !== null && route.overlay !== 'controls'}
                         />
                     </Suspense>
@@ -457,9 +494,11 @@ export const TvApp = () => {
                     <TvQueueOverlay
                         queue={player.queue}
                         currentIndex={player.currentIndex}
+                        onClose={isCar ? goBack : undefined}
+                        showCloseButton={!isCar}
                         onPlay={index => {
                             player.playQueue(player.queue, index);
-                            setRoute(current => ({ ...current, overlay: 'controls' }));
+                            setRoute({ page: 'player', overlay: 'controls' });
                         }}
                     />
                 )}
@@ -470,6 +509,7 @@ export const TvApp = () => {
                             backgroundMode={player.backgroundMode}
                             onVisualizerModeChange={player.setVisualizerMode}
                             onBackgroundModeChange={player.setBackgroundMode}
+                            onClose={isCar ? goBack : undefined}
                         />
                     </Suspense>
                 )}
@@ -477,11 +517,15 @@ export const TvApp = () => {
                     <TvCollectionOverlay
                         collection={collection}
                         onPlayTracks={playTracks}
+                        onClose={isCar ? goBack : undefined}
+                        showCloseButton={!isCar}
                     />
                 )}
                 {route.overlay === 'search' && (
                     <TvSearchOverlay
                         onPlayTracks={playTracks}
+                        onClose={isCar ? goBack : undefined}
+                        showCloseButton={!isCar}
                     />
                 )}
                 {route.overlay === 'login' && (
@@ -489,15 +533,18 @@ export const TvApp = () => {
                         account={account}
                         startError={loginError}
                         onSwitchConfirmed={closeAccount}
+                        onClose={isCar ? goBack : undefined}
+                        showCloseButton={!isCar}
                     />
                 )}
-                {route.overlay === 'exit' && (
+                {route.overlay === 'exit' && !isCar && (
                     <TvExitOverlay
                         isPlaying={player.status === 'playing'}
                         canBackground={nativePlayback.canBackground}
                         canExit={nativePlayback.canExit}
                         onBackground={leaveInBackground}
                         onExit={exitTvApp}
+                        onClose={isCar ? goBack : undefined}
                     />
                 )}
             </TvChunkLoadBoundary>
@@ -505,4 +552,3 @@ export const TvApp = () => {
         </div>
     );
 };
-

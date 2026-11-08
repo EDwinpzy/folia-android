@@ -17,6 +17,7 @@ export type TvAudioTransport = {
     resume: () => Promise<boolean>;
     pause: () => void;
     seekBy: (deltaSeconds: number) => void;
+    seekTo: (seconds: number) => void;
     reset: () => void;
     fail: () => void;
 };
@@ -104,6 +105,15 @@ export const useTvAudioTransport = ({
         currentTime.set(nextTime);
     }, [currentTime, duration]);
 
+    const seekTo = useCallback((seconds: number) => {
+        const audio = audioRef.current;
+        if (!audio || !Number.isFinite(seconds)) return;
+        const max = Number.isFinite(audio.duration) ? audio.duration : duration;
+        const nextTime = Math.max(0, Math.min(max || Number.POSITIVE_INFINITY, seconds));
+        audio.currentTime = nextTime;
+        currentTime.set(nextTime);
+    }, [currentTime, duration]);
+
     useEffect(() => {
         const audio = audioRef.current;
         if (!audio) return undefined;
@@ -178,8 +188,8 @@ export const useTvAudioTransport = ({
         resume,
         pause,
         seekBy,
+        seekTo,
         reset,
         fail,
     };
 };
-

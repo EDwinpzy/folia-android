@@ -44,7 +44,10 @@ export type TvOnlineHomeModel = {
     playDailyRecommendations: () => Promise<SongResult[] | null>;
 };
 
-export const useTvOnlineHome = (account: TvAccountModel): TvOnlineHomeModel => {
+export const useTvOnlineHome = (
+    account: TvAccountModel,
+    enabled = true,
+): TvOnlineHomeModel => {
     const { t } = useTranslation();
     const providerId = account.activeProviderId;
     const userId: MediaId | null = account.activeAccount?.user?.id ?? null;
@@ -56,8 +59,8 @@ export const useTvOnlineHome = (account: TvAccountModel): TvOnlineHomeModel => {
         () => readOnlineProviderCapabilities(providerId),
         [providerId],
     );
-    const canUseAlbums = capabilities.userLibrary && Boolean(capabilities.userAlbums);
-    const canUseRadio = capabilities.recommendations;
+    const canUseAlbums = enabled && capabilities.userLibrary && Boolean(capabilities.userAlbums);
+    const canUseRadio = enabled && capabilities.recommendations;
 
     const resourcesRef = useRef<ReturnType<typeof createTvOnlineHomeResources> | null>(null);
     if (!resourcesRef.current) resourcesRef.current = createTvOnlineHomeResources();
@@ -76,6 +79,11 @@ export const useTvOnlineHome = (account: TvAccountModel): TvOnlineHomeModel => {
     const [radioActionError, setRadioActionError] = useState<TvRadioActionError | null>(null);
 
     useLayoutEffect(() => {
+        if (!enabled) {
+            favoriteAlbums.setOwner(null);
+            radioFeed.setOwner(null);
+            return;
+        }
         const albumsOwner = canUseAlbums ? owner : null;
         const radioOwner = canUseRadio ? owner : null;
         favoriteAlbums.setOwner(albumsOwner);
@@ -87,7 +95,7 @@ export const useTvOnlineHome = (account: TvAccountModel): TvOnlineHomeModel => {
             favoriteAlbums.setOwner(null);
             radioFeed.setOwner(null);
         };
-    }, [canUseAlbums, canUseRadio, favoriteAlbums, owner, radioFeed]);
+    }, [canUseAlbums, canUseRadio, enabled, favoriteAlbums, owner, radioFeed]);
 
     useEffect(() => {
         playbackRequestRef.current += 1;
