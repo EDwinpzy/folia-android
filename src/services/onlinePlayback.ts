@@ -16,10 +16,12 @@ import { getSongResourceCacheKey } from './onlineMusic/resourceKeys';
 import { deleteCachedSongAudio, getCachedSongAudioBlob, getCachedSongReplayGain, getSongCacheWithLegacyMigration } from './onlineMusic/resourceCache';
 import { measureSongAudio, notTheSongWhy } from './wholeSongCheck';
 import { isCachedSongAudioDistrusted } from './playbackRecovery/mediaCacheGuard';
-import { toPlayableAudioUrl } from '../utils/appPlaybackHelpers';
-import { getOnlineProviderIdForSong } from '../utils/appPlaybackGuards';
+import { audioMimeTypeFor, toPlayableAudioUrl } from '../utils/appPlaybackHelpers';
+import { IS_ANDROID_WEBVIEW } from '../utils/platform';
+import { getOnlineProviderIdForSong, getPlaybackSongKey } from '../utils/appPlaybackGuards';
 import { getProviderSongMetadata } from './onlineMusic/songMetadata';
 import { useLyricSettingsStore } from '../stores/useLyricSettingsStore';
+import { noteOnlinePlaybackOutcome } from '../utils/onlinePlaybackDiagnostics';
 import { useOnlineProviderAccountStore } from '../stores/useOnlineProviderAccountStore';
 import { saveLyricCacheSongMetadata } from './lyricExport/lyricCacheMetadata';
 import { errorFields } from '../utils/errorText';
@@ -27,6 +29,104 @@ import { errorFields } from '../utils/errorText';
 // How long playback waits for a stored copy's header to give its play length (`wholeCopy`). Past
 // it the copy plays untested: the check must not hold up a song that starts from the cache.
 const COPY_CHECK_CEILING_MS = 300;
+// ── 安卓：跨源媒体的 CORS 缺口 ────────────────────────────────────────────
+// 播放器的 <audio> 带 crossOrigin="anonymous"，又接 WebAudio 分析：CDN 不回 CORS 头时，
+// 地址拿到了却一个音频事件都没有（表现为「取链成功但无声」）。
+// 这里经原生 HTTP 桥（nativeAndroidBridge 的 fetch 代理，已白名单各平台 CDN 域名）把文件
+// 拉成同源 blob 再交给音频元素：blob 同源，crossOrigin 与 WebAudio 分析都不再受 CDN 限制。
+// 哪些平台需要这样做由平台自己声明（OnlineMusicProvider.requiresSameOriginAudio）。
+const proxiedAudioObjectUrls = new Map<string, string>();
+// 拉整首音频比普通 API 慢：给原生桥 30 秒，前端最多等 25 秒；等太久就退回平台地址，
+// 不让「一直在拉流」把播放卡成永远不开始。
+const PROXIED_AUDIO_TIMEOUT_MS = 25_000;
+
+const describeAudioHost = (url: string): string => {
+    try { return new URL(url).hostname.slice(0, 60); } catch { return 'invalid-url'; }
+};
+
+const readProxiedAudioBlob = async (url: string): Promise<Blob> => {
+    const attempt = async () => {
+        const response = await fetch(url, { foliaTimeoutMs: PROXIED_AUDIO_TIMEOUT_MS + 5_000 } as RequestInit);
+        if (!response.ok) throw new Error(`upstream answered ${response.status}`);
+        const blob = await response.blob();
+        // 几百字节的「音频」一定是错误页/占位符，不是能放的文件。
+        if (blob.size < 4096) throw new Error('upstream answered a stub (' + blob.size + ' bytes)');
+        return blob;
+    };
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    try {
+        return await Promise.race([
+            attempt(),
+            new Promise<Blob>((_resolve, reject) => {
+                timeout = setTimeout(() => reject(new Error(`timed out after ${PROXIED_AUDIO_TIMEOUT_MS}ms`)), PROXIED_AUDIO_TIMEOUT_MS);
+            }),
+        ]);
+    } finally {
+        if (timeout) clearTimeout(timeout);
+    }
+};
+
+const isLocalStreamUrl = (url: string): boolean => {
+    try {
+        const host = new URL(url).hostname;
+        return host === '127.0.0.1' || host === 'localhost';
+    } catch {
+        return false;
+    }
+};
+
+const androidProxiedAudioUrl = async (url: string, provider: string | undefined): Promise<string> => {
+    if (!IS_ANDROID_WEBVIEW || !provider || !omni.requiresSameOriginAudio(provider)) return url;
+    // omni 已把它挂到原生本地流服务（Range + ACAO:*）上时，不要再整文件拉一遍 blob。
+    if (isLocalStreamUrl(url)) return url;
+    const cached = proxiedAudioObjectUrls.get(url);
+    if (cached) return cached;
+    const startedAt = Date.now();
+    let blob: Blob | null = null;
+    try {
+        blob = await readProxiedAudioBlob(url);
+    } catch (firstError) {
+        // 一次重试：CDN 偶尔对首个请求回 5xx / 空响应，重试后通常就好。
+        console.warn('[Playback] proxying the audio file failed once; retrying', errorFields(firstError));
+        try {
+            blob = await readProxiedAudioBlob(url);
+        } catch (retryError) {
+            console.warn('[Playback] proxying the audio file failed; playing the platform address directly', errorFields(retryError));
+            noteOnlinePlaybackOutcome({
+                stage: 'media', outcome: 'error', providerId: provider ?? 'unknown', kind: 'proxy-source',
+                detail: `${describeAudioHost(url)} failed: ${String(errorFields(retryError).message ?? 'unknown')}`.slice(0, 160),
+            });
+            return url;
+        }
+    }
+    try {
+        // CDN 常把音频标成 application/octet-stream 或不给类型；按文件头补一个正确 MIME，
+        // 否则播放器可能判成不支持的源（报告里是 media-error-4 / no supported sources）。
+        const headBytes = new Uint8Array(await blob.slice(0, 16).arrayBuffer());
+        const mime = audioMimeTypeFor(url, blob.type, headBytes);
+        const playableBlob = mime && mime !== blob.type ? blob.slice(0, blob.size, mime) : blob;
+        const objectUrl = URL.createObjectURL(playableBlob);
+        console.info('[Playback] proxied audio for same-origin playback', {
+            host: new URL(url).hostname, bytes: playableBlob.size, mime: playableBlob.type || '(none)', ms: Date.now() - startedAt,
+        });
+        noteOnlinePlaybackOutcome({
+            stage: 'media', outcome: 'ok', providerId: provider ?? 'unknown', kind: 'proxy-source',
+            detail: `${describeAudioHost(url)} ${playableBlob.size}B ${playableBlob.type || 'no-mime'} ${Date.now() - startedAt}ms`.slice(0, 160),
+        });
+        proxiedAudioObjectUrls.set(url, objectUrl);
+        while (proxiedAudioObjectUrls.size > 24) {
+            const oldest = proxiedAudioObjectUrls.keys().next().value;
+            if (!oldest) break;
+            const old = proxiedAudioObjectUrls.get(oldest);
+            proxiedAudioObjectUrls.delete(oldest);
+            if (old) URL.revokeObjectURL(old);
+        }
+        return objectUrl;
+    } catch (error) {
+        console.warn('[Playback] could not hand the proxied audio to the player', errorFields(error));
+        return url;
+    }
+};
 
 export type OnlineAudioSourceResult =
     // `preview`: the URL plays a preview clip of the song, as its provider said (omni notes it).
@@ -47,6 +147,12 @@ export interface LoadOnlineAudioSourceOptions {
 
 const sleepBeforeRetry = (ms: number): Promise<void> => new Promise(resolve => {
     globalThis.setTimeout(resolve, ms);
+});
+
+/** 诊断用的一行歌曲身份：标题 + 歌手，不含账号信息。 */
+const songDiagnosticIdentity = (song: SongResult): { songTitle: string; songArtist: string } => ({
+    songTitle: String(song.name || '').slice(0, 80),
+    songArtist: (song.artists || []).map(artist => artist?.name).filter(Boolean).join(' / ').slice(0, 80),
 });
 
 export async function loadOnlineSongAudioSource(
@@ -132,6 +238,14 @@ export async function loadOnlineSongAudioSource(
         // The platform asked to wait and the wait is not over: it is not asked again before then.
         const cooldown = providerId ? onlineRequestCooldown(providerId, 'play') : null;
         if (cooldown) {
+            // 冷却期内不会发起取流：单独留痕，否则报告里既没有请求也没有失败。
+            noteOnlinePlaybackOutcome({
+                stage: 'resolve', outcome: 'error', providerId: providerId ?? 'unknown',
+                ...songDiagnosticIdentity(song),
+                mediaId: getPlaybackSongKey(song), quality: audioQuality,
+                kind: 'rate-limited(cooldown)', code: cooldown.remainingMs,
+                detail: 'provider cooldown: request skipped', elapsedMs: 0,
+            });
             return await unavailable(onlineFailureOf(
                 { operation: 'audio', providerId },
                 { detail: { case: 'retry-later', retryAfterMs: cooldown.remainingMs } },
@@ -147,17 +261,32 @@ export async function loadOnlineSongAudioSource(
         } catch (error) {
             thrown = error ?? new Error('The audio source request failed');
         }
-        const url = thrown === undefined ? toPlayableAudioUrl(source?.url) : null;
-        if (url) {
+        // 安卓上声明了 requiresSameOriginAudio 的平台：先经原生桥拉成同源 blob（失败就照用平台地址）。
+        // 预取/记录用平台给的原始地址（blob 只活在这一个会话），播放才用 blob。
+        const playableUrl = thrown === undefined ? toPlayableAudioUrl(source?.url) : null;
+        const playUrl = playableUrl ? await androidProxiedAudioUrl(playableUrl, providerId) : null;
+        if (playUrl && playableUrl) {
             const replayGain = applyOnlineAudioSourceMetadata(song, source?.replayGain).replayGain;
-            updatePrefetchedAudioUrl(song, url, audioQuality, replayGain);
-            return { kind: 'ok', audioSrc: url, replayGain, preview: omni.isPreviewAudioSource(url) };
+            updatePrefetchedAudioUrl(song, playableUrl, audioQuality, replayGain);
+            return { kind: 'ok', audioSrc: playUrl, replayGain, preview: omni.isPreviewAudioSource(playableUrl) };
         }
         const failure = thrown === undefined
             // A provider (a mod's) that answers null, or an address that may not be played.
             ? onlineFailureOf({ operation: 'audio', providerId, signedOut }, { detail: { case: 'no-audio' } })
             : onlineFailureOf({ operation: 'audio', providerId, signedOut }, { error: thrown });
         noteOnlineRequestCooldown(failure);
+        // 「暂时无法播放这首歌」来自 invalid-response / unknown 两档：把 stage、reason、上游码、是否拿到地址
+        // 记下来，否则报告里只有一条 ok 记录、对不上。
+        noteOnlinePlaybackOutcome({
+            stage: 'resolve', outcome: 'error', providerId: providerId ?? 'unknown',
+            ...songDiagnosticIdentity(song),
+            mediaId: getPlaybackSongKey(song), quality: audioQuality,
+            kind: failure.case,
+            code: failure.facts?.upstreamCode ?? failure.facts?.httpStatus,
+            detail: [failure.operation ? 'op=' + failure.operation : '', failure.facts?.message ?? '']
+                .filter(Boolean).join(' ').slice(0, 140),
+            elapsedMs: 0,
+        });
 
         const delays = autoRetryDelaysMs(failure);
         const retry = options.retry;

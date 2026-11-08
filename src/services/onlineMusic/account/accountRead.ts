@@ -272,6 +272,12 @@ export const createAccountReads = <R>(deps: AccountReadsDeps<R>) => {
         reads.whoUnknownAt = null;
         reads.whoUnknownTimes = 0;
         if (user) return user;
+        // 一次读不到人可能是抖动；会给「再确认一次」能力的平台先确认，确认不了才清会话。
+        if (had && provider.auth?.confirmSessionLoss) {
+            const confirmed = await provider.auth.confirmSessionLoss();
+            if (reads.generation !== generation) return 'unknown';
+            if (confirmed) return confirmed;
+        }
         // The platform names nobody, or refuses the sign-in: the account leaves.
         await drop(provider.id, reads, had ? 'auth-required' : undefined, () => provider.auth?.signInRanOut?.());
         console.log(`[Account] ${said}: ${had ? 'the sign-in is no longer valid, the account left' : 'nobody is signed in'}`);

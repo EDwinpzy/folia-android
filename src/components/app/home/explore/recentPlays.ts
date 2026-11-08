@@ -180,7 +180,7 @@ export const resetRecentPlays = (): void => {
     setRightTo.clear();
 };
 
-/** Calls `watcher` whenever a play changes the list of an account. */
+/** Calls `watcher` whenever a play changes what is recorded for an account, including only its time. */
 export const watchRecentPlays = (watcher: () => void): (() => void) => {
     watchers.add(watcher);
     return () => { watchers.delete(watcher); };
@@ -208,9 +208,9 @@ const NO_PLAYS: readonly RecentPlay[] = [];
 /**
  * The plays of the last seven days of a scope (an online platform under an account, local files,
  * a Navidrome user), newest first, each with when it was last played: for an online platform the
- * songs of `recentPlaysOf`, for a list that shows when (the scratchpad's play history). The same list until a play changes it or its oldest one has become
- * too old. (Playing the newest song again moves its time on in place and tells nobody: read later,
- * the newest one's time may be later than it was.)
+ * songs of `recentPlaysOf`, for a list that shows when (the scratchpad's play history). The same list
+ * until a play changes it or its oldest one has become too old. Playing the newest song again moves
+ * its time on in place and tells the watchers, though a single scope's list stays the same.
  */
 export const recentPlayRecordsOf = (scope: PlayScope): readonly RecentPlay[] => {
     const now = Date.now();
@@ -296,9 +296,11 @@ const note = (song: SongResult, accountId: string, listening?: { lengthMs: numbe
     const isCounted = listening !== undefined
         && (listening.wentStraightOn || !(again !== undefined && goesOn(again, now, listening.lengthMs)));
     if (!isCounted && again !== undefined && again === before[0] && isRecent(again, now) && kept.length === before.length) {
-        // The newest already and played lately, no listening to count, and nothing has become too old: the lists are the ones they were and nobody is told; only its time is new.
+        // The newest already and played lately, no listening to count, and nothing has become too old:
+        // this scope's list is the one it was, but its time is new and merged histories may reorder.
         again.at = now;
         store(recall());
+        for (const watcher of watchers) watcher();
         return;
     }
     const played: Play = {

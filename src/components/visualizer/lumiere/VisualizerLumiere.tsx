@@ -36,6 +36,7 @@ const VisualizerLumiere: React.FC<VisualizerSharedProps> = (props) => {
         lyricsFontScale = 1,
         staticMode = false,
         paused = false,
+        reducedEffects = false,
         seed = 'lumiere',
         songTitle,
         songArtist,
@@ -62,8 +63,26 @@ const VisualizerLumiere: React.FC<VisualizerSharedProps> = (props) => {
     const antialias = isPreviewMode ? false : resolveLyricAntialias(renderQuality.antialias, false);
 
     // 运行时创建期间这些输入可能已经变了；create 完成后按最新值补一次。
-    const latestRef = useRef({ tuning: lumiereTuning, paused, showText, staticMode, audioPower, audioBands, renderScale });
-    latestRef.current = { tuning: lumiereTuning, paused, showText, staticMode, audioPower, audioBands, renderScale };
+    const latestRef = useRef({
+        tuning: lumiereTuning,
+        paused,
+        showText,
+        staticMode,
+        audioPower,
+        audioBands,
+        renderScale,
+        reducedEffects,
+    });
+    latestRef.current = {
+        tuning: lumiereTuning,
+        paused,
+        showText,
+        staticMode,
+        audioPower,
+        audioBands,
+        renderScale,
+        reducedEffects,
+    };
     const metadataRef = useRef<LumiereSongMetadata>({ title: songTitle, artist: songArtist, album: songAlbum });
     metadataRef.current = { title: songTitle, artist: songArtist, album: songAlbum };
 
@@ -120,6 +139,7 @@ const VisualizerLumiere: React.FC<VisualizerSharedProps> = (props) => {
                 staticMode: latest.staticMode,
                 showText: latest.showText,
                 paused: latest.paused,
+                reducedEffects: latest.reducedEffects,
                 metadata: metadataRef.current,
                 renderScale: latest.renderScale,
                 antialias,
@@ -133,6 +153,7 @@ const VisualizerLumiere: React.FC<VisualizerSharedProps> = (props) => {
             runtime.setStaticMode(current.staticMode);
             runtime.setAudioSources(current.audioPower, current.audioBands);
             runtime.setPaused(current.paused);
+            runtime.setReducedEffects(current.reducedEffects);
             return runtime;
         },
         swap: async (runtime, song, signal) => {
@@ -150,6 +171,10 @@ const VisualizerLumiere: React.FC<VisualizerSharedProps> = (props) => {
     useEffect(() => {
         runtimeRef.current?.setRenderScale(renderScale);
     }, [renderScale, runtimeRef]);
+
+    useEffect(() => {
+        runtimeRef.current?.setReducedEffects(reducedEffects);
+    }, [reducedEffects, runtimeRef]);
 
     useEffect(() => {
         runtimeRef.current?.setShowText(showText);

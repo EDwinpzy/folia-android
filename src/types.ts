@@ -138,7 +138,7 @@ export type ThemeMode = 'default' | 'ai' | 'custom';
 
 export type BuiltinVisualizerMode = 'classic' | 'cadenza' | 'partita' | 'fume' | 'monet';
 export type VisualizerMode = BuiltinVisualizerMode | (string & {});
-export type VisualizerFrameRate = 'off' | 120 | 90 | 60;
+export type VisualizerFrameRate = 'off' | 30 | 120 | 90 | 60;
 
 /**
  * 用 canvas / WebGL 画的歌词样式的渲染分辨率：相对样式自己默认像素密度（大多是屏幕的 devicePixelRatio，钳到 2）的倍数，
@@ -1075,6 +1075,8 @@ export type VisualizerBackgroundMode = BuiltinVisualizerBackgroundMode | (string
 
 export interface UrlBackgroundItem {
   id: string;
+  /** 'url'（默认）是网页；'image' 是本地静态图片的 data URL。 */
+  kind?: 'url' | 'image';
   url: string;
   note: string;
 }
@@ -1428,6 +1430,9 @@ export interface LocalSong {
   id: string; // UUID for local file
   fileName: string;
   filePath: string; // File path for reference
+  /** Android 移植：MediaStore / 导入文件的系统媒体 ID，播放时用它向本地音频服务要流；不持久化 URL。 */
+  nativeAudioUrl?: string; // Android MediaStore-backed stream URL
+  nativeAudioRef?: string;
   fileHandle?: FileSystemFileHandle; // For re-accessing the file (not persisted, stored in memory)
   duration: number; // milliseconds
   fileSize: number; // bytes

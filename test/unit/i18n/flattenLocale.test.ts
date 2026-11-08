@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import zhCN from '../../../src/i18n/locales/zh-CN';
-import { flattenLocale } from '../../../src/i18n/config';
+import { flattenLocale } from '../../../src/i18n/flattenLocale';
 
 // test/unit/i18n/flattenLocale.test.ts
 // Reference copy of the pre-rewrite flatten. Each recursive return copied the map built so far.

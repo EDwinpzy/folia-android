@@ -1,4 +1,5 @@
 import type { SongResult, UnifiedSong } from '../../../types';
+import { noteLibraryStep } from '../../../nativeBridge/api/libraryTrace.js';
 import type {
     AudioQualityPreference,
     MediaId,
@@ -185,14 +186,39 @@ const loadRawLikedTracks = async (
     };
 };
 
+// 探索页的排行榜/电台卡片 id 自带类型（toplist-4、radio-101）；有的界面只把 id 交回来，
+// 用 id 还原出 providerData，否则会被当成普通歌单去读、结果空列表（排行榜点进去「没有数据」）。
+const qqListCollectionFromId = (id: MediaId): ProviderCollection | null => {
+    const value = String(id || '');
+    const toplist = /^toplist-(\d+)$/.exec(value);
+    if (toplist) {
+        return { providerId: 'qq', id: value, type: 'playlist', name: '', providerData: { list: 'toplist', listId: Number(toplist[1]) } };
+    }
+    const radio = /^radio-(\d+)$/.exec(value);
+    if (radio) {
+        return { providerId: 'qq', id: value, type: 'playlist', name: '', providerData: { list: 'radio', listId: Number(radio[1]) } };
+    }
+    return null;
+};
+
 const getPlaylistTracks = async (
     id: MediaId,
     limit: number,
     offset: number,
     collection?: ProviderCollection,
 ): Promise<ProviderPage<ReturnType<typeof normalizeQqSong>>> => {
+    if (!collection || !qqListKindOf(collection)) {
+        const fromId = qqListCollectionFromId(id);
+        if (fromId) collection = collection ? { ...collection, providerData: { ...collection.providerData, ...fromId.providerData } } : fromId;
+    }
     // 排行榜和电台的卡片（探索页）不是歌单，改走它们自己的路由。
-    if (collection && qqListKindOf(collection)) return getQqListTracks(collection, limit, offset);
+    if (collection && qqListKindOf(collection)) {
+        const result = await getQqListTracks(collection, limit, offset);
+        noteLibraryStep('qq', 'collection:list-tracks', {
+            id: String(id), kind: qqListKindOf(collection), offset, items: result.items.length,
+        });
+        return result;
+    }
     const safeLimit = Math.max(1, limit);
     const safeOffset = Math.max(0, offset);
     const dirId = Number(collection?.providerData?.dirId);
@@ -497,6 +523,51 @@ const noteLoginStatusCheck = (summary: LoginDiagnosticLine): void => {
     lastLoginStatusCheck = diagnosticLine`${formatDiagnosticClock(Date.now())} ${summary}`;
 };
 
+// 账号展示信息（昵称 / 头像）来自上游的 profile 页，偶发失败时凭据还在、名字和头像却会一起消失。
+// 按账号 id 缓存上一次的结果，只在字段缺失时补齐：切账号不会串（键是 id），上游给了新值也不会被旧值覆盖。
+const QQ_PROFILE_CACHE_KEY = 'folia_qq_profile_cache';
+const QQ_PROFILE_CACHE_LIMIT = 8;
+
+type QqProfileCacheEntry = { nickname?: string; avatarUrl?: string; at?: number };
+
+const readQqProfileCache = (): Record<string, QqProfileCacheEntry> => {
+    try {
+        const raw = localStorage.getItem(QQ_PROFILE_CACHE_KEY);
+        if (!raw) return {};
+        const parsed = JSON.parse(raw) as unknown;
+        return parsed && typeof parsed === 'object' ? parsed as Record<string, QqProfileCacheEntry> : {};
+    } catch {
+        return {};
+    }
+};
+
+const cacheQqProfile = (user: ProviderUser): void => {
+    if (!user.id || (!user.nickname && !user.avatarUrl)) return;
+    try {
+        const cache = readQqProfileCache();
+        cache[String(user.id)] = {
+            ...(user.nickname ? { nickname: user.nickname } : {}),
+            ...(user.avatarUrl ? { avatarUrl: user.avatarUrl } : {}),
+            at: Date.now(),
+        };
+        const recent = Object.entries(cache)
+            .sort(([, a], [, b]) => (b.at ?? 0) - (a.at ?? 0))
+            .slice(0, QQ_PROFILE_CACHE_LIMIT);
+        localStorage.setItem(QQ_PROFILE_CACHE_KEY, JSON.stringify(Object.fromEntries(recent)));
+    } catch {
+        // 存不下就当没有缓存，不影响登录本身。
+    }
+};
+
+const withCachedQqProfile = (user: ProviderUser): ProviderUser => {
+    if (user.nickname && user.avatarUrl) return user;
+    const cached = user.id ? readQqProfileCache()[String(user.id)] : undefined;
+    if (!cached) return user;
+    const nickname = user.nickname || cached.nickname || '';
+    const avatarUrl = user.avatarUrl || cached.avatarUrl;
+    return { ...user, nickname, ...(avatarUrl ? { avatarUrl } : {}) };
+};
+
 // 后端不认这个 session 就是登录没了，只有一种例外：主进程这次启动没能读出加密的登录仓库，这次运行里也还没有新登录替掉它，
 // 存着的 session 就是停用的（isQqSessionParked），请求没带它。那时是「查不到」：报 unavailable，accountRead 只记这次读失败、留着
 // session；回 null 会让它删掉 session，下次能读出仓库时也找不回来。这次运行里扫码登录过，后端不认了就照常是登录没了。
@@ -534,6 +605,7 @@ const getLoginStatus = async (): Promise<ProviderUser | null> => {
         console.info('[QQProvider] login-status:profile', {
             hasUserId: Boolean(user.id),
             hasNickname: Boolean(user.nickname),
+            hasAvatar: Boolean(user.avatarUrl),
         });
         return user;
     } catch (error) {

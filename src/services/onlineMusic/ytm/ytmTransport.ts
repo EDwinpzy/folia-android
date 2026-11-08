@@ -1,4 +1,5 @@
 import { OnlineProviderError } from '../../../types/onlineMusic';
+import { IS_ANDROID_WEBVIEW } from '../../../utils/platform';
 import type { ProviderErrorCode } from '../../../types/onlineMusic';
 
 // src/services/onlineMusic/ytm/ytmTransport.ts
@@ -9,7 +10,9 @@ export type YtmOperation =
     | 'login_status' | 'logout'
     | 'web_login_start' | 'web_login_check' | 'web_login_cancel' | 'web_login_open'
     | 'search_songs' | 'search_albums' | 'search_playlists' | 'song_detail' | 'song_detail_en' | 'song_detail_zh' | 'lyrics' | 'album' | 'artist' | 'playlist' | 'public_playlist' | 'user_playlists' | 'user_albums' | 'audio'
-    | 'explore' | 'mix' | 'playlist_edit' | 'list_save' | 'list_saved' | 'song_like' | 'song_versions' | 'played_as';
+    | 'explore' | 'mix' | 'playlist_edit' | 'list_save' | 'list_saved' | 'song_like' | 'song_versions' | 'played_as'
+    // 安卓侧读账号播放历史（android/ytmAndroidHistory.ts）；桌面桥没有这个操作。
+    | 'account_history';
 export type YtmParams = Record<string, string | undefined>;
 // `reason`: the desktop side's own word for why a sign-in failed, where it has one.
 export type YtmBridgeResult =
@@ -70,8 +73,19 @@ export type YtmWireWebLoginState =
     | { state: 'confirmed'; account: unknown }
     | { state: 'error'; message: string; code?: ProviderErrorCode; reason?: string };
 
+// 安卓没有桌面主进程：那里每个操作都在页面内跑（android/ytmAndroidBridge.ts），
+// 首次用到时才把这个模块加载进来；桌面仍走 IPC。
+const hasDesktopBridge = () => typeof window !== 'undefined' && typeof window.electron?.ytmRequest === 'function';
+
+const sendRequest = async (operation: YtmOperation, params: YtmParams): Promise<YtmBridgeResult> => {
+    if (hasDesktopBridge()) return window.electron!.ytmRequest(operation, params);
+    const { requestYtmOnAndroid } = await import('./android/ytmAndroidBridge');
+    return requestYtmOnAndroid(operation, params);
+};
+
 export const getYtmTransportAvailability = () => (
-    typeof window !== 'undefined' && typeof window.electron?.ytmRequest === 'function'
+    typeof window !== 'undefined'
+    && (typeof window.electron?.ytmRequest === 'function' || IS_ANDROID_WEBVIEW)
         ? { configured: true } as const
         : { configured: false, reason: 'runtime-unavailable' } as const
 );
@@ -82,7 +96,7 @@ export async function requestYtm<T = unknown>(operation: YtmOperation, params: Y
     }
     const startedAt = Date.now();
     let result: YtmBridgeResult;
-    try { result = await window.electron!.ytmRequest(operation, params); }
+    try { result = await sendRequest(operation, params); }
     catch {
         console.warn(`[Ytm] ${operation} did not reach the desktop app`);
         throw new OnlineProviderError('network', 'YouTube Music desktop request failed', 'ytm');

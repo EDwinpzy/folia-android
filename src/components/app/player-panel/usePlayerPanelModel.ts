@@ -10,6 +10,7 @@ import { useThemeSettingsStore } from '../../../stores/useThemeSettingsStore';
 import { useAudioSettingsStore } from '../../../stores/useAudioSettingsStore';
 import { useVisualizerSettingsStore } from '../../../stores/useVisualizerSettingsStore';
 import { usePlayerChromeSettingsStore } from '../../../stores/usePlayerChromeSettingsStore';
+
 import { useOnlineProviderAccountStore } from '../../../stores/useOnlineProviderAccountStore';
 import { selectDisplayCoverUrl, selectDisplayLyrics, selectDisplayPlayerState, usePlaybackStore } from '../../../stores/usePlaybackStore';
 import type { LocalSong, SongResult } from '../../../types';
@@ -54,6 +55,7 @@ export const usePlayerPanelModel = ({
     const { t } = useTranslation();
     const isPanelOpen = useAppViewStore(state => state.isPanelOpen);
     const isPlayerChromeHidden = useAppChromeStore(state => state.isPlayerChromeHidden);
+
     const isPanelGuideHotspotActive = useAppChromeStore(state => state.isPlayerPanelGuideHotspotActive);
     const starredNavidromeSongIds = useLibraryStore(state => state.starredNavidromeSongIds);
     const isDaylight = useThemeSettingsStore(state => state.isDaylight);
@@ -151,6 +153,7 @@ export const usePlayerPanelModel = ({
         showOpenPanelCloseButton,
         isPanelGuideHotspotActive,
         isPlayerChromeHidden,
+
         shouldHidePlayerRightPanelButton,
         activePlaybackContext,
         audioQuality,

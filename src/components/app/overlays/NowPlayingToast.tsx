@@ -158,7 +158,8 @@ const NowPlayingToast: React.FC<NowPlayingToastProps> = ({
                     // 由共享 MotionValue 直接驱动 bottom（默认 32，即原来的 bottom-8）。
                     style={position.style}
                     data-now-playing-card=""
-                    className={`pointer-events-none fixed w-max max-w-[calc(100vw-48px)] ${isPositioning ? 'z-[65]' : 'z-40'}`}
+                    data-folia-now-playing-toast="true"
+                    className={'pointer-events-none fixed w-max max-w-[calc(100vw-48px)] ' + (isPositioning ? 'z-[65]' : 'z-40')}
                 >
                     {/* 描边排在卡片前面：卡片自己是 relative，绘制顺序上压在描边上头，所以
                         描边内侧那一半被卡片背景盖住，露在外面的是外侧 + 辉光。

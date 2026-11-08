@@ -18,9 +18,9 @@
 | library | 256+ |
 | services | 256+ |
 | backend/electron | 128+ |
+| src (其他) | 128+ |
 | utils | 128+ |
 | hooks | 64+ |
-| src (其他) | 64+ |
 | 其他 | 64+ |
 | stores | 32+ |
 | types | 16+ |
@@ -47,6 +47,7 @@
 | 64+ | `src/mods/folium/contract.ts` |
 | 64+ | `src/services/db.ts` |
 | 64+ | `src/services/onlineMusic/omni.ts` |
+| 64+ | `src/services/onlineMusic/songMetadata.ts` |
 | 64+ | `src/stores/useAppViewStore.ts` |
 | 64+ | `src/stores/useAudioSettingsStore.ts` |
 | 64+ | `src/stores/useOnlineProviderAccountStore.ts` |
@@ -59,6 +60,7 @@
 | 32+ | `src/components/modal/settings/kit/motion.ts` |
 | 32+ | `src/components/ponder/surfaces/relativeRectStyle.ts` |
 | 32+ | `src/components/ponder/surfaces/surfaceDeclarations.ts` |
+| 32+ | `src/components/visualizer/backgrounds/definition.ts` |
 | 32+ | `src/components/visualizer/colorMix.ts` |
 | 32+ | `src/components/visualizer/hanabi/types.ts` |
 | 32+ | `src/components/visualizer/machi/engine/materials.ts` |
@@ -76,7 +78,6 @@
 | 32+ | `src/services/baseThemes.ts` |
 | 32+ | `src/services/onlineMusic/failure/onlineFailureCase.ts` |
 | 32+ | `src/services/onlineMusic/providerRegistry.ts` |
-| 32+ | `src/services/onlineMusic/songMetadata.ts` |
 | 32+ | `src/stores/motionSignals.ts` |
 | 32+ | `src/stores/useCollectionNavigationStore.ts` |
 | 32+ | `src/stores/usePlayerChromeSettingsStore.ts` |
@@ -90,6 +91,7 @@
 | 32+ | `src/utils/lyricRenderQuality.ts` |
 | 32+ | `src/utils/lyrics/graphemeTiming.ts` |
 | 32+ | `src/utils/lyrics/parserCore.ts` |
+| 32+ | `src/utils/platform.ts` |
 | 32+ | `test/component/fixtures.ts` |
 
 ## 动态注册点
@@ -151,6 +153,7 @@
 - `dev/probes/subtitleOverlayRows.probe.tsx`
 - `dev/probes/themePark.probe.tsx`
 - `dev/probes/trackTitleNavigator.probe.tsx`
+- `dev/probes/tvLyrics.probe.tsx`
 - `dev/probes/visualizerMemory.probe.tsx`
 - `dev/probes/wallToolsIsland.probe.tsx`
 - `dev/probes/wallpaperDisplayRow.probe.tsx`
@@ -335,6 +338,10 @@
 下面这些边的依赖方向本身就是错的：
 
 - D101 `src/stores/useVisualizerSettingsStore.ts` → `src/components/visualizer/registry.tsx`  —— store 不应依赖组件
+- D102 `src/utils/buildDiagnosticReport.ts` → `src/components/visualizer/backgrounds/registry.tsx`  —— 纯变换不应依赖 UI 或状态
+- D102 `src/utils/buildDiagnosticReport.ts` → `src/stores/useAudioSettingsStore.ts`  —— 纯变换不应依赖 UI 或状态
+- D102 `src/utils/buildDiagnosticReport.ts` → `src/stores/usePlaybackStore.ts`  —— 纯变换不应依赖 UI 或状态
+- D102 `src/utils/buildDiagnosticReport.ts` → `src/stores/useVideoLayerSettingsStore.ts`  —— 纯变换不应依赖 UI 或状态
 - D102 `src/utils/lyrics/lyricMatchSources.ts` → `src/stores/useOnlineProviderAccountStore.ts`  —— 纯变换不应依赖 UI 或状态
 
 ### 目录归属存疑

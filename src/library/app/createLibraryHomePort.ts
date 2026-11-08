@@ -7,6 +7,7 @@ import { translateHomeMessage } from '../core/home/homeSources';
 import { importFolder, resyncAllFolders, LOCAL_MUSIC_SCAN_PROGRESS_EVENT } from '../../services/localMusicService';
 import { getLocalLibraryAvailability } from '../../services/localLibraryAvailability';
 import { importLocalPlaylistFile } from '../../services/localPlaylistFileService';
+import { isAndroidNativeRuntime, scanAndroidDeviceMusic } from '../../services/nativeLocalMusic';
 import { useOnlineProviderAccountStore } from '../../stores/useOnlineProviderAccountStore';
 import { selectProviderPersonalFm, usePersonalFmModeStore } from '../../stores/usePersonalFmModeStore';
 import { isSamePersonalFmSelection, normalizePersonalFmSelection, toPersonalFmRequestOptions } from '../../services/onlineMusic/fmModes';
@@ -37,6 +38,8 @@ export const createLibraryHomePort = (getSurface: () => HomePortSurface): Librar
     return {
         localAvailability: () => getLocalLibraryAvailability(),
         importFolder: async () => (await importFolder()).length,
+        scanDeviceMusic: async () => (await scanAndroidDeviceMusic()).length,
+        deviceScanAvailable: () => isAndroidNativeRuntime(),
         resyncAllFolders: async () => (await resyncAllFolders())?.length ?? 0,
         importPlaylistFile: async (file) => {
             const result = await importLocalPlaylistFile(file, getSurface().localSongs);

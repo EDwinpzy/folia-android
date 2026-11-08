@@ -1,6 +1,10 @@
+import { noteLibraryStep } from '../../nativeBridge/api/libraryTrace.js';
 import { DEFAULT_PERSONAL_FM_CATALOG } from './fmModes';
 import type { PersonalFmCatalog } from '../../types/personalFm';
 import type { SongResult, UnifiedSong } from '../../types';
+import { noteOnlineMutationFailure } from '../../utils/onlineMutationDiagnostics';
+import { proxyNativeRemoteAudioUrl } from '../nativeRemoteAudio';
+import { noteOnlinePlaybackError, noteOnlinePlaybackOutcome } from '../../utils/onlinePlaybackDiagnostics';
 import type {
     AudioQualityPreference,
     DailyStyleGroup,
@@ -234,6 +238,26 @@ const runRequest = async <T>(provider: OnlineMusicProvider, operation: OnlineFai
     }
 };
 
+/**
+ * Android 诊断：在线写入（红心 / 订阅 / 歌单改动）失败时留一条记录再往上抛。
+ *
+ * 这些失败以前在报告里完全看不到：provider 在缺少标识时会**提前拒绝**（一个请求都不发），
+ * 用户只看到「收藏失败」，分不清是缺标识、缺登录还是上游拒收。
+ */
+const tracedMutation = async <T>(
+    providerId: string,
+    operation: string,
+    mediaId: string | number,
+    run: () => Promise<T>,
+): Promise<T> => {
+    try {
+        return await run();
+    } catch (error) {
+        noteOnlineMutationFailure({ providerId, operation, mediaId, error });
+        throw error;
+    }
+};
+
 const emptyPage = <T>(offset: number): OmniPage<T> => ({ items: [], hasMore: false, nextOffset: offset });
 
 // Lists the app makes from a provider's reads, that are nobody's playlist: the listening ranking
@@ -343,8 +367,13 @@ const sendSongLike = async (
         || String(useOnlineProviderAccountStore.getState().accounts[source.providerId]?.user?.id) === String(sentAs)
     );
 
-    // 失败时点赞状态保持原样，错误往上抛给调用方。
-    await provider.mutations.likeSong(song, liked);
+    // 失败时点赞状态保持原样，错误往上抛给调用方；Android 诊断里留一条（provider / 操作 / 条目 / 原因）。
+    try {
+        await provider.mutations.likeSong(song, liked);
+    } catch (error) {
+        noteOnlineMutationFailure({ providerId: source.providerId, operation: 'like', mediaId: songKey, error });
+        throw error;
+    }
 
     // An answer to a request that was given up (the heart was put back and the run ended as
     // failed) writes no like: the next whole read of the liked songs says what the provider
@@ -590,6 +619,11 @@ export const omni = {
 
     supportsDailySongs(providerId: OmniProviderId): boolean {
         return typeof requireOnlineMusicProvider(providerId).recommendations?.getDailySongs === 'function';
+    },
+
+    // 安卓上这个平台的音频是否要经原生桥拉成同源 blob（平台自己声明，见 OnlineMusicProvider）。
+    requiresSameOriginAudio(providerId: OmniProviderId): boolean {
+        return getOnlineMusicProvider(providerId)?.requiresSameOriginAudio === true;
     },
 
     getProviderLabel(providerId: OmniProviderId): string {
@@ -939,6 +973,13 @@ export const omni = {
                 ...errorFields(failure.reason),
             }));
             const valueOf = <T>(result: PromiseSettledResult<T[]>): T[] => (result.status === 'fulfilled' ? result.value : []);
+            // 首页推荐三块各自的结果都记下来：电台页「暂无内容」时报告里能直接看出哪一块空。
+            noteLibraryStep(provider.id, 'home-feed:section', {
+                personalFm: valueOf(personalFm).length,
+                daily: valueOf(dailySongs).length,
+                collections: valueOf(recommendedCollections).length,
+                failed: failures.map(failure => (failure.reason as { message?: string } | null)?.message ?? 'failed').join(' | ').slice(0, 120),
+            });
             return {
                 personalFm: valueOf(personalFm),
                 dailySongs: valueOf(dailySongs),
@@ -1194,17 +1235,37 @@ export const omni = {
         return audioQualityFor(providerId, preference);
     },
 
+    // 安卓诊断：取到的播放地址最终是「原生本地流服务」还是「远端 CDN」，或没取到。
+    // 报告里据此区分「omni 代理成功」与「退回直连」，不含平台名。
+    describeResolvedAudioUrl(url: string | null | undefined): string {
+        const value = String(url || '');
+        if (!value) return '';
+        if (value.startsWith('blob:')) return 'blob';
+        try {
+            const parsed = new URL(value);
+            if (parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost') return `native-stream:${parsed.port}`;
+            return `${parsed.protocol}//${parsed.hostname}`.slice(0, 80);
+        } catch {
+            return 'invalid-url';
+        }
+    },
     async getAudioSource(song: SongResult, quality: AudioQualityPreference): Promise<OmniAudioSource | null> {
         const provider = providerForSong(song);
         const level = audioQualityFor(provider.id, quality);
         let source: OmniAudioSource | null;
+        // Android 诊断：取流三档结果都留痕，报告能分辨「没给地址」与「provider 抛错」。
+        const resolveStartedAt = Date.now();
         try {
             source = await runRequest(provider, 'audio', async () => await (provider.playback?.getAudioSource(song, level) ?? null));
         } catch (error) {
             // The provider gave no address. An extension may still give one, as it may where the provider answers null;
             // without one the very error goes on, for the caller to sort (failure/onlineFailureCase.ts).
             const fromHook = await applyOmniAudioHook(song, null);
-            if (fromHook?.url) return fromHook;
+            if (fromHook?.url) {
+                noteOnlinePlaybackOutcome({ stage: 'resolve', outcome: 'ok', providerId: provider.id, songTitle: song.name, songArtist: (song.artists || []).map(a => a?.name).filter(Boolean).join(' / '), quality: level, kind: 'hook-rescued', elapsedMs: Date.now() - resolveStartedAt });
+                return fromHook;
+            }
+            noteOnlinePlaybackError({ stage: 'resolve', providerId: provider.id, songTitle: song.name, songArtist: (song.artists || []).map(a => a?.name).filter(Boolean).join(' / '), quality: level, elapsedMs: Date.now() - resolveStartedAt, error });
             throw error;
         }
         // Written here rather than at either caller because this is the only moment a provider ever
@@ -1229,7 +1290,26 @@ export const omni = {
             });
         }
         // Extension layers (Folium omni hooks) may swap the URL; the ReplayGain above stays the provider's.
-        return applyOmniAudioHook(song, source);
+        const hooked = await applyOmniAudioHook(song, source);
+        // Android：把 CDN 音频地址挂到本地流服务上（带 ACAO:* 与 Range），绕开 WebView 的 CORS。
+        // 桌面浏览器没有 Capacitor 插件，函数原样返回；地址没变时保持同一个对象（调用方按引用判断）。
+        let resolved = hooked;
+        if (hooked?.url) {
+            const proxiedUrl = await proxyNativeRemoteAudioUrl(hooked.url);
+            if (proxiedUrl !== hooked.url) resolved = { ...hooked, url: proxiedUrl };
+        }
+        noteOnlinePlaybackOutcome({
+            stage: 'resolve',
+            outcome: resolved?.url ? 'ok' : 'no-source',
+            providerId: provider.id,
+            songTitle: song.name,
+            songArtist: (song.artists || []).map(a => a?.name).filter(Boolean).join(' / '),
+            quality: level,
+            kind: resolved?.url ? '' : 'empty-url',
+            detail: resolved?.url ? this.describeResolvedAudioUrl(resolved.url) : 'provider returned no playable url',
+            elapsedMs: Date.now() - resolveStartedAt,
+        });
+        return resolved;
     },
 
     // The level a URL handed out by `getAudioSource` was asked for at. Undefined for any other URL
@@ -1397,8 +1477,9 @@ export const omni = {
             if (!mutations?.subscribeAlbum) return unsupported(collection.providerId, 'album-subscription');
             return mutations.subscribeAlbum(collection.id, subscribed);
         }
-        if (!mutations?.subscribePlaylist) return unsupported(collection.providerId, 'playlist-subscription');
-        return mutations.subscribePlaylist(collection, subscribed);
+        const subscribePlaylist = mutations?.subscribePlaylist;
+        if (!subscribePlaylist) return unsupported(collection.providerId, 'playlist-subscription');
+        return tracedMutation(collection.providerId, 'subscribe-playlist', collection.id, () => subscribePlaylist(collection, subscribed));
     },
 
     async updateCollectionTracks(collection: OmniCollection, operation: 'add' | 'del', tracks: SongResult[]): Promise<void> {

@@ -12,13 +12,45 @@ import {
     isPlayerControlSlotActionId,
     type PlayerControlSlotActionId,
 } from '../types/playerControlSlots';
-import { PLAYER_BOTTOM_BAR_BASE_OFFSET_PX } from '../utils/playerBottomBarLayout';
+import {
+    PLAYER_BOTTOM_BAR_BASE_OFFSET_PX,
+    resolvePlayerBottomBarMaxOffset,
+} from '../utils/playerBottomBarLayout';
 import { getStoredBoolean, setStoredBoolean } from './storagePrimitives';
 import { setStatusMessage } from './useStatusMessageStore';
 
 const PLAYER_BOTTOM_BAR_OFFSET_STORAGE_KEY = 'player_bottom_bar_offset';
 const PLAYER_CONTROL_SLOT_PRIMARY_STORAGE_KEY = 'player_control_slot_primary';
 const PLAYER_CONTROL_SLOT_SECONDARY_STORAGE_KEY = 'player_control_slot_secondary';
+
+/**
+ * 安卓上的底部偏移量原来由一个自由滑块写入：在可滚动列表里被手指蹭一下就会把控制条抬到画面中间
+ * 并立刻持久化，装新版本也不会自己恢复。滑块已从安卓端移除（改用「调整位置」流程），这里把历史
+ * 遗留的大偏移复位一次；小幅抬高属于正常使用，不动它。
+ */
+const ANDROID_OFFSET_RESET_FLAG = 'folia_android_bottom_bar_offset_reset_v1';
+
+const migrateLegacyAndroidBottomBarOffset = (offsetPx: number): number => {
+    if (typeof window === 'undefined') return offsetPx;
+    const isAndroid = (window as unknown as { Capacitor?: { getPlatform?: () => string } })
+        .Capacitor?.getPlatform?.() === 'android';
+    if (!isAndroid) return offsetPx;
+
+    try {
+        if (localStorage.getItem(ANDROID_OFFSET_RESET_FLAG) === '1') return offsetPx;
+        localStorage.setItem(ANDROID_OFFSET_RESET_FLAG, '1');
+
+        const max = resolvePlayerBottomBarMaxOffset(window.innerHeight);
+        const quarterOfRange = PLAYER_BOTTOM_BAR_BASE_OFFSET_PX
+            + (max - PLAYER_BOTTOM_BAR_BASE_OFFSET_PX) * 0.25;
+        if (offsetPx < quarterOfRange) return offsetPx;
+
+        localStorage.setItem(PLAYER_BOTTOM_BAR_OFFSET_STORAGE_KEY, String(PLAYER_BOTTOM_BAR_BASE_OFFSET_PX));
+        return PLAYER_BOTTOM_BAR_BASE_OFFSET_PX;
+    } catch {
+        return offsetPx;
+    }
+};
 
 /** Reads the persisted lower-bounded offset; the viewport-dependent upper bound is applied by consumers. */
 const readStoredPlayerBottomBarOffset = (): number => {
@@ -31,7 +63,9 @@ const readStoredPlayerBottomBarOffset = (): number => {
         return PLAYER_BOTTOM_BAR_BASE_OFFSET_PX;
     }
 
-    return Math.max(PLAYER_BOTTOM_BAR_BASE_OFFSET_PX, Math.round(parsed));
+    return migrateLegacyAndroidBottomBarOffset(
+        Math.max(PLAYER_BOTTOM_BAR_BASE_OFFSET_PX, Math.round(parsed)),
+    );
 };
 
 const readStoredPlayerControlSlot = (
@@ -62,6 +96,8 @@ export type PlayerChromeSettingsState = {
     transparentPlayerBackground: boolean;
     enablePlayerPageNativeBlur: boolean;
     autoHidePlayerChrome: boolean;
+    /** Android 沉浸模式：命令面板按钮的自动隐藏开关。 */
+    autoHideCommandPaletteButton: boolean;
     autoHideCursorWithPlayerChrome: boolean;
     hideCursorWhenIdle: boolean;
     showOpenPanelCloseButton: boolean;
@@ -80,6 +116,7 @@ export type PlayerChromeSettingsState = {
     handleToggleTransparentPlayerBackground: (enable: boolean) => void;
     handleWallpaperTransparentRefused: () => void;
     handleToggleAutoHidePlayerChrome: (enable: boolean) => void;
+    handleToggleAutoHideCommandPaletteButton: (enable: boolean) => void;
     handleToggleAutoHideCursorWithPlayerChrome: (enable: boolean) => void;
     handleToggleHideCursorWhenIdle: (enable: boolean) => void;
     handleToggleOpenPanelCloseButton: (enable: boolean) => void;
@@ -106,6 +143,7 @@ export const usePlayerChromeSettingsStore = create<PlayerChromeSettingsState>((s
     transparentPlayerBackground: getStoredBoolean('transparent_player_background', false),
     enablePlayerPageNativeBlur: getStoredBoolean('enable_player_page_native_blur', false),
     autoHidePlayerChrome: getStoredBoolean('auto_hide_player_chrome', false),
+    autoHideCommandPaletteButton: getStoredBoolean('auto_hide_command_palette_button', false),
     // Rides the chrome auto-hide clock rather than owning one: the cursor goes away with the
     // controls it would have clicked. Opt-out, so auto-hide can keep the pointer if wanted.
     autoHideCursorWithPlayerChrome: getStoredBoolean('auto_hide_cursor_with_player_chrome', true),
@@ -125,6 +163,10 @@ export const usePlayerChromeSettingsStore = create<PlayerChromeSettingsState>((s
     handleToggleAutoHidePlayerChrome: (enabled: boolean) => {
         localStorage.setItem('auto_hide_player_chrome', enabled ? 'true' : 'false');
         set({ autoHidePlayerChrome: enabled });
+    },
+    handleToggleAutoHideCommandPaletteButton: (enabled: boolean) => {
+        localStorage.setItem('auto_hide_command_palette_button', enabled ? 'true' : 'false');
+        set({ autoHideCommandPaletteButton: enabled });
     },
     handleToggleAutoHideCursorWithPlayerChrome: (enable) => {
         setStoredBoolean('auto_hide_cursor_with_player_chrome', enable);
@@ -266,6 +308,7 @@ export const selectPlayerChromeSettingsSnapshot = (state: PlayerChromeSettingsSt
     transparentPlayerBackground: state.transparentPlayerBackground,
     enablePlayerPageNativeBlur: state.enablePlayerPageNativeBlur,
     autoHidePlayerChrome: state.autoHidePlayerChrome,
+    autoHideCommandPaletteButton: state.autoHideCommandPaletteButton,
     autoHideCursorWithPlayerChrome: state.autoHideCursorWithPlayerChrome,
     hideCursorWhenIdle: state.hideCursorWhenIdle,
     showOpenPanelCloseButton: state.showOpenPanelCloseButton,
@@ -283,6 +326,7 @@ export const selectPlayerChromeSettingsSnapshot = (state: PlayerChromeSettingsSt
     setTransparentPlayerBackgroundFromSystem: state.setTransparentPlayerBackgroundFromSystem,
     handleTogglePlayerPageNativeBlur: state.handleTogglePlayerPageNativeBlur,
     handleToggleAutoHidePlayerChrome: state.handleToggleAutoHidePlayerChrome,
+    handleToggleAutoHideCommandPaletteButton: state.handleToggleAutoHideCommandPaletteButton,
     handleToggleAutoHideCursorWithPlayerChrome: state.handleToggleAutoHideCursorWithPlayerChrome,
     handleToggleHideCursorWhenIdle: state.handleToggleHideCursorWhenIdle,
     handleToggleOpenPanelCloseButton: state.handleToggleOpenPanelCloseButton,

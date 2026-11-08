@@ -16,6 +16,7 @@ import { usePlayerControlSlotCustomization } from './floating-player/usePlayerCo
 import { usePlayerBottomBarBottomPx } from '../hooks/usePlayerBottomBarBottomPx';
 import { playerBottomBarLiveOffset } from '../stores/motionSignals';
 import { usePlayerBottomBarLayoutStore } from '../stores/usePlayerBottomBarLayoutStore';
+import { useAndroidLayoutSettingsStore } from '../stores/useAndroidLayoutSettingsStore';
 import { usePlayerChromeSettingsStore } from '../stores/usePlayerChromeSettingsStore';
 import { openSettings } from '../stores/useSettingsModalStore';
 import { PLAYER_BOTTOM_BAR_BASE_OFFSET_PX, clampPlayerBottomBarOffset, resolvePlayerBottomBarMaxOffset } from '../utils/playerBottomBarLayout';
@@ -350,6 +351,7 @@ const FloatingPlayerControls: React.FC<FloatingPlayerControlsProps> = ({
     }, [isPositioning]);
 
     const handlePositionDragStart = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+        // 触摸没有 hover，按下就展开，展开后这一次点击仍然落在同一颗胶囊上。
         if (!isPositioning) {
             return;
         }
@@ -578,18 +580,20 @@ const FloatingPlayerControls: React.FC<FloatingPlayerControlsProps> = ({
     return (
         <>
             {/*
-                定位层和动画层必须分开。这一层用 Tailwind 的 `-translate-x-1/2` 做水平居中，
-                而下面那层的 animate 会写 y/scale —— framer-motion 生成的 transform 会整个
-                盖掉同一节点上的 Tailwind transform，合并两层会让胶囊丢失居中、向右偏出去。
+                定位层和动画层必须分开。这一层用内联 transform 做水平居中：Tailwind v4 的
+                `-translate-x-1/2` 编译成独立的 `translate` 属性，Chrome 99 的旧 WebView 不认，
+                胶囊会从 50% 处开始、整条偏到屏幕右侧（个别旧设备反馈的错位）。
+                下面那层的 animate 会写 y/scale，transform 不能挂在同一节点上，否则会互相覆盖。
                 bottom 走共享 MotionValue（默认 32，即原来的 bottom-8），不是 transform 属性，
                 所以挂在这一层不会干扰居中。
             */}
             <motion.div
-                className={`absolute left-1/2 -translate-x-1/2 z-60 w-full flex justify-center pointer-events-none
+                data-folia-player-controls="true"
+                className={`absolute left-1/2 z-60 w-full flex justify-center pointer-events-none
                     ${currentView === 'home'
                         ? 'max-w-[calc(100vw-120px)] md:max-w-[min(calc(32rem_+_var(--folium-player-bar-extra,0px)),calc(100vw-120px))]'
                         : 'max-w-[min(calc(32rem_+_var(--folium-player-bar-extra,0px)),100vw)] px-4'}`}
-                style={{ bottom: bottomBarBottomPx }}
+                style={{ bottom: bottomBarBottomPx, transform: 'translateX(-50%)' }}
                 onUpdate={invalidateLayout}
             >
             {/* 这一层的透明度、位移和缩放全由下面的 animate 驱动，不再叠一层 CSS transition：
@@ -666,11 +670,14 @@ const FloatingPlayerControls: React.FC<FloatingPlayerControlsProps> = ({
                         // 经外层 lift 表达，再让 drag 往这个节点写一份 y 会叠加成两倍位移；
                         // 而且 dragConstraints 依赖的起始值放在 ref 里不会触发重渲染，读到的会是上一帧的。
                         data-ponder="player-bar"
+                        data-folia-player-bar-expanded={showExpanded ? 'true' : 'false'}
                         onPointerDown={handlePositionDragStart}
                         onPointerMove={handlePositionDragMove}
                         onPointerUp={handlePositionDragEnd}
                         onPointerCancel={handlePositionDragEnd}
-                        style={{ touchAction: isPositioning ? 'none' : undefined }}
+                        // manipulation drops the legacy tap delay and the double-tap zoom on
+                        // touch screens; only the positioning drag needs to swallow gestures.
+                        style={{ touchAction: isPositioning ? 'none' : 'manipulation' }}
                         className={`backdrop-blur-xl shadow-2xl overflow-hidden rounded-full relative transition-colors duration-300
                             ${isPositioning ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'}
                             ${showExpanded ? `p-3 ${glassBgExpanded} w-full` : `px-4 py-2 ${glassBgCollapsed} ${COLLAPSED_WIDTH_CLASS}`}`}
@@ -841,11 +848,17 @@ const ExpandedView: React.FC<ExpandedViewProps> = ({
     );
 
     return (
-        <div className="grid w-full grid-cols-[1fr_auto_1fr] items-center gap-x-4 gap-y-2 sm:grid-cols-[auto_minmax(0,1fr)_auto]">
+        <div
+            data-folia-player-bar-grid="true"
+            className="grid w-full grid-cols-[1fr_auto_1fr] items-center gap-x-4 gap-y-2 sm:grid-cols-[auto_minmax(0,1fr)_auto]"
+        >
             {/* Desktop Layout - responsive grid positions apply from the sm breakpoint */}
             {/* Mobile Layout - base grid positions apply below the sm breakpoint */}
             {/* Row 1: Centered Title */}
-            <div className="col-span-3 row-start-1 min-w-0 px-2 sm:col-start-2 sm:col-span-1">
+            <div
+                data-folia-player-bar-title="true"
+                className="col-span-3 row-start-1 min-w-0 px-2 sm:col-start-2 sm:col-span-1"
+            >
                 {trackNavigation ? (
                     <TrackTitleNavigator
                         title={currentSong?.name || noTrackText}
@@ -871,6 +884,7 @@ const ExpandedView: React.FC<ExpandedViewProps> = ({
 
             {/* Row 3: Loop Button, Play Button, Lyrics Button */}
             <button
+                data-folia-player-bar-play="true"
                 onClick={(e) => {
                     e.stopPropagation();
                     onTogglePlay();
@@ -913,13 +927,12 @@ const ExpandedView: React.FC<ExpandedViewProps> = ({
             </div>
 
             {/* Row 2: Current Time, Progress Bar, Duration */}
-            {/* HiFi 路线上时长后面多一块 HiFi 徽标，按这一行的宽度换长短，进度条留够最小宽度；Web 路线和原来一模一样。 */}
             {isHifiRoute ? (
-                <HifiProgressRow className={PROGRESS_ROW_CLASS} isDaylight={isDaylight} disabled={controlsDisabled}>
+                <HifiProgressRow data-folia-player-bar-progress="true" className={PROGRESS_ROW_CLASS} isDaylight={isDaylight} disabled={controlsDisabled}>
                     {progressBar}
                 </HifiProgressRow>
             ) : (
-                <div className={PROGRESS_ROW_CLASS}>{progressBar}</div>
+                <div data-folia-player-bar-progress="true" className={PROGRESS_ROW_CLASS}>{progressBar}</div>
             )}
         </div>
     );

@@ -10,13 +10,16 @@ import {
     type Theme,
 } from '../../../../types';
 import { extractRepresentativeColors } from '../../../../utils/colorExtractor';
+import { useDevicePerformanceProfile } from '../../../../hooks/useDevicePerformanceProfile';
 import { updatePaperShaderUniforms } from '../../../../utils/paperShaderUniforms';
+import { resolvePaperShaderPixelCount } from '../../../../utils/paperShaderBudget';
 import { createPaperShaderReleaseRef, PAPER_SHADER_CONTEXT_ATTRIBUTES } from '../../../../utils/paperShaderContext';
 import { useFirstFrameDrawn } from '../../styleTransition/firstFrame';
 import { useBlendedColors } from '../useBlendedColors';
 import { beatImpact, downbeatImpact } from '../../../../stores/motionSignals';
 import { getBeatEffectStrength, isBeatFxReady } from '../../../../services/beatFx/beatFxLive';
 import { BEAT_EFFECT_IDS } from '../../../../services/beatFx/beatEffects';
+import { getActiveTransitionCue } from '../../../../services/automix/transitionCue';
 
 // src/components/visualizer/backgrounds/latent/LatentBackground.tsx
 // Layers two cover-colored Paper shaders and drives their uniforms without React frame updates.
@@ -41,7 +44,7 @@ interface LatentBackgroundProps {
     blendProgress?: MotionValue<number>;
 }
 
-const MAX_SHADER_PIXELS = 1280 * 720;
+const BALANCED_MAX_SHADER_PIXELS = 1280 * 720;
 const PAUSED_SPEED_SCALE = 0.12;
 // How fast the speed goes from playing to paused or back, as a time constant: settled in about a second.
 const PAUSE_EASE_MS = 300;
@@ -82,6 +85,19 @@ export const resolveLatentBeatSpeedTarget = (
 ) => clampAudioAmount(broadbandEnergy * 0.42 + onsetPulse * 0.85);
 /** The beat FX onset: the larger of the two envelopes the beat clock writes, each 0..2 once scaled. */
 export const resolveLatentBeatFxPulse = (beat: number, downbeat: number) => Math.max(beat, downbeat);
+/**
+ * automix 可听过渡期间，背景的节拍脉动保持当前速度。
+ *
+ * 过渡时 analyser 读的是两条 deck 叠加后的能量：同一首歌也能出现两路不同位置/增益的拍点，
+ * 脉动会一快一慢地抽。这里不是关掉节奏响应，而是把速度目标钉在进入过渡前的那一拍，
+ * 等 settle 后再交回新歌；智能动感模式关着时同样适用（这条脉动本来就来自 audioBands）。
+ */
+export const holdLatentBeatSpeedDuringTransition = (
+    transitionAudible: boolean,
+    currentSpeed: number,
+    nextSpeed: number,
+) => (transitionAudible ? currentSpeed : nextSpeed);
+
 export const resolveLatentAudioSpeedTarget = (
     broadbandEnergy: number,
     onsetPulse: number,
@@ -138,6 +154,7 @@ const LatentBackground: React.FC<LatentBackgroundProps> = ({
     blendMs = 0,
     blendProgress,
 }) => {
+    const { tier } = useDevicePerformanceProfile();
     const ditheringRef = useRef<PaperShaderElement | null>(null);
     const meshRef = useRef<PaperShaderElement | null>(null);
     // Stable callback refs: they also lose each shader's WebGL context when it unmounts.
@@ -149,10 +166,16 @@ const LatentBackground: React.FC<LatentBackgroundProps> = ({
     // How far the loop below has eased between paused (0) and playing (1). Outside the loop's effect,
     // so a re-run of it (a setting changed mid-ease) goes on from there.
     const playingRef = useRef(paused ? 0 : 1);
+    // 暂停时循环会自己停下；恢复播放时用它把下一帧重新踢起来。
+    const loopKickRef = useRef<(() => void) | null>(null);
     const [coverColors, setCoverColors] = useState<string[]>([]);
     const tuning = tuningOverride ?? DEFAULT_LATENT_BACKGROUND_TUNING;
     const showDithering = tuning.displayMode !== 'mesh';
     const showMesh = tuning.displayMode !== 'dithering';
+    const maxShaderPixels = resolvePaperShaderPixelCount(
+        BALANCED_MAX_SHADER_PIXELS,
+        tier === 'constrained',
+    );
     pausedRef.current = paused;
     // A copy mounted for a change of type is ready once the cover's colours are read.
     const colorsDrawn = useFirstFrameDrawn();
@@ -285,7 +308,7 @@ const LatentBackground: React.FC<LatentBackgroundProps> = ({
             // 智能动感模式 on is asking for the beat response.
             // Only while 潮汐脉动 plays (retired 2026-10-17: the original pulse even under a mode whose
             // own effect has the beats in).
-            const beatSpeedTarget = !isPaused && isBeatFxReady() && getBeatEffectStrength(BEAT_EFFECT_IDS.latentPulse) > 0
+            const computedBeatSpeedTarget = !isPaused && isBeatFxReady() && getBeatEffectStrength(BEAT_EFFECT_IDS.latentPulse) > 0
                 ? resolveLatentBeatSpeedTarget(
                     targetBeatEnergy,
                     resolveLatentBeatFxPulse(beatImpact.get(), downbeatImpact.get()),
@@ -295,6 +318,12 @@ const LatentBackground: React.FC<LatentBackgroundProps> = ({
                     latentOnsetPulse,
                     tuning.enhancedBeatResponse,
                 );
+            // 过渡期把速度目标钉住，避免两条 deck 的拍点叠加时背景抽动。
+            const beatSpeedTarget = holdLatentBeatSpeedDuringTransition(
+                getActiveTransitionCue() !== null,
+                smoothedBeatSpeed,
+                computedBeatSpeedTarget,
+            );
             smoothedBeatSpeed = easeTowards(
                 smoothedBeatSpeed,
                 beatSpeedTarget,
@@ -330,11 +359,32 @@ const LatentBackground: React.FC<LatentBackgroundProps> = ({
                 writeLayerStyle(meshLayerRef.current, 'filter', `saturate(${1.04 + smoothedMid * 0.34}) brightness(${0.94 + smoothedPower * 0.16})`);
                 writeLayerStyle(meshLayerRef.current, 'transform', `scale(${1.025 + smoothedPower * 0.018})`);
             }
+            // 暂停且缓动已停稳后不再往下跑：把这一帧的后续帧撤掉，省掉每帧的 JS 归一化与样式写入。
+            // 恢复播放由下方的 paused effect 重新踢起来。
+            const settled = pausedRef.current && playingRef.current < 0.01
+                && smoothedPower < 0.001 && smoothedBass < 0.001 && smoothedMid < 0.001 && smoothedBeatSpeed < 0.001;
+            if (settled) {
+                cancelAnimationFrame(animationFrame);
+                animationFrame = 0;
+            }
         };
 
+        loopKickRef.current = () => {
+            if (animationFrame) return;
+            lastFrameAt = null;
+            animationFrame = requestAnimationFrame(updateAudioResponse);
+        };
         animationFrame = requestAnimationFrame(updateAudioResponse);
-        return () => cancelAnimationFrame(animationFrame);
+        return () => {
+            loopKickRef.current = null;
+            cancelAnimationFrame(animationFrame);
+        };
     }, [audioBands, audioPower, showMesh, staticMode, tuning]);
+
+    // 暂停时上面这个循环会自行停下；恢复播放要把下一帧重新踢起来（它不会自己醒来）。
+    useEffect(() => {
+        if (!paused) loopKickRef.current?.();
+    }, [paused]);
 
     // The shaders' `speed` prop is only where they start, and 0 where static: the frame loop sets the
     // speed from there and eases a pause in. A prop that followed `paused` would set it at once.
@@ -351,6 +401,7 @@ const LatentBackground: React.FC<LatentBackgroundProps> = ({
                 >
                     <MeshGradient
                         ref={meshShaderRef}
+                        className="folia-paper-shader-fill"
                         width="100%"
                         height="100%"
                         colors={shaderColors.mesh}
@@ -360,7 +411,7 @@ const LatentBackground: React.FC<LatentBackgroundProps> = ({
                         grainOverlay={0.01}
                         speed={staticMode ? 0 : tuning.meshSpeed}
                         minPixelRatio={1}
-                        maxPixelCount={MAX_SHADER_PIXELS}
+                        maxPixelCount={maxShaderPixels}
                         webGlContextAttributes={PAPER_SHADER_CONTEXT_ATTRIBUTES}
                         style={{ width: '100%', height: '100%' }}
                     />
@@ -379,6 +430,7 @@ const LatentBackground: React.FC<LatentBackgroundProps> = ({
                 >
                     <Dithering
                         ref={ditheringShaderRef}
+                        className="folia-paper-shader-fill"
                         width="100%"
                         height="100%"
                         colorBack={shaderColors.ditheringBack}
@@ -388,7 +440,7 @@ const LatentBackground: React.FC<LatentBackgroundProps> = ({
                         size={tuning.ditheringSize}
                         speed={staticMode ? 0 : tuning.ditheringSpeed}
                         minPixelRatio={1}
-                        maxPixelCount={MAX_SHADER_PIXELS}
+                        maxPixelCount={maxShaderPixels}
                         webGlContextAttributes={PAPER_SHADER_CONTEXT_ATTRIBUTES}
                         style={{ width: '100%', height: '100%' }}
                     />

@@ -9,6 +9,7 @@ import { useVisualizerSettingsStore } from '../../../../stores/useVisualizerSett
 import { Button, Group, Reveal, Row, Segmented, Toggle, Value, option, type SettingsGroupDef, type SettingsOptionDef } from '../kit';
 import { settingsAnchorSubview } from '../navigation/settingsAnchorModel';
 import AiProviderSettings, { AI_SETTINGS_OPTIONS } from './ai/AiProviderSettings';
+import { canUseDirectAiText } from '../../../../utils/platform';
 import { useSettingsPage } from './settingsPageContext';
 
 // src/components/modal/settings/pages/AppearancePage.tsx
@@ -133,7 +134,7 @@ const AppearancePage: React.FC = () => {
                 </Row>
             </Group>
 
-            {isElectron && <AiProviderSettings />}
+            {(isElectron || canUseDirectAiText()) && <AiProviderSettings />}
         </>
     );
 };

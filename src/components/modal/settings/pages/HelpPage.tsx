@@ -1,10 +1,9 @@
 import React from 'react';
-import { ChevronRight, CircleHelp, ExternalLink, Lightbulb, MessageCircle, Sparkles, Users, type LucideIcon } from 'lucide-react';
+import { Check, ChevronRight, CircleHelp, ExternalLink, FileDown, FileText, Lightbulb, Loader2, Sparkles, Trash2, Users, type LucideIcon } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { openPonderNavigation } from '../../../../services/ponder/pagePonderTarget';
 import { BUILD_KIND_TAGS, getBuildKind } from '../../../../utils/buildProvenance';
 import { PRIMARY_MODIFIER_LABEL } from '../../../../utils/platform';
-import { openDiscordInvite } from '../../../shared/discordCommunity';
 import { QQ_COMMUNITY_GROUP_NUMBER } from '../../../shared/qqCommunity';
 import { HELP_TAB_PLAYER_CONTROLS, HELP_TAB_PRIMARY_SHORTCUTS } from '../../userGuideContent';
 import { Button, CopyButton, CopyValue, Group, Keys, Row, type SettingsGroupDef } from '../kit';
@@ -12,17 +11,20 @@ import { openOutsideLink } from '../../../../utils/system/outsideLink';
 import { FoundUpdateRow } from './FoundUpdateRow';
 import { ChinaDrivesRow } from './ChinaDrivesRow';
 import { iconLabel } from './iconLabel';
+import { buildDiagnosticReport } from '../../../../utils/buildDiagnosticReport';
+import { canDeleteExportedDiagnostics, deleteExportedDiagnostics, exportDiagnosticReport } from '../../../../services/exportDiagnosticReport';
+import { copyText } from '../../../../utils/system/clipboard';
 
 // src/components/modal/settings/pages/HelpPage.tsx
 // The 帮助 page, reached from the foot of the side list: two entry cards (the release notes, the
 // Ponder tutorials), the keyboard shortcuts and the player's keys side by side, where to get help
-// (the help dialog, the Discord server, the QQ group), and the version with a found update and the
+// (the help dialog, the QQ group), and the version with a found update and the
 // project link. A build that is not this repository's own says so under its version. It is not a settings category, so it
 // is not in pages/index.ts and the search does not list it; the settings window mounts it itself
 // and hands it the two dialogs it opens.
 
-const REPOSITORY_URL = 'https://github.com/chthollyphile/folia-major';
-const REPOSITORY_NAME = 'chthollyphile/folia-major';
+const REPOSITORY_URL = 'https://github.com/whycfawa/folia-android';
+const REPOSITORY_NAME = 'whycfawa/folia-android';
 const BUILD_KIND = getBuildKind();
 const VERSION_INFO = (__DOCKER_STACK_VERSION__
     ? `${__APP_VERSION_LABEL__} v${__APP_VERSION__} · Stack ${__DOCKER_STACK_VERSION__} · ${__COMMIT_HASH__}`
@@ -99,6 +101,45 @@ type HelpPageProps = {
 
 const HelpPage: React.FC<HelpPageProps> = ({ onOpenReleaseNotes, onOpenAiHelp, onProjectLabelClick }) => {
     const { t } = useTranslation();
+    // 诊断反馈：把 buildDiagnosticReport 的报告整段复制，用户贴进反馈即可。
+    const [diagnosticsCopied, setDiagnosticsCopied] = React.useState<'idle' | 'copied' | 'failed'>('idle');
+    const copyDiagnostics = async () => {
+        try {
+            await copyText(await buildDiagnosticReport());
+            setDiagnosticsCopied('copied');
+        } catch {
+            setDiagnosticsCopied('failed');
+        }
+        window.setTimeout(() => setDiagnosticsCopied('idle'), 2400);
+    };
+    // 导出：生成 txt 交给系统分享（安卓走 FoliaNative.shareTextFile，桌面浏览器走 Web Share / 下载）。
+    const [diagnosticsExport, setDiagnosticsExport] = React.useState<'idle' | 'working' | 'shared' | 'downloaded' | 'failed'>('idle');
+    const exportDiagnostics = async () => {
+        setDiagnosticsExport('working');
+        try {
+            const report = await buildDiagnosticReport();
+            const result = await exportDiagnosticReport(report, t('help.exportDiagnostics'));
+            setDiagnosticsExport(result === 'cancelled' ? 'idle' : result);
+        } catch (error) {
+            console.warn('[Settings] diagnostics:export-failed', error);
+            setDiagnosticsExport('failed');
+        }
+    };
+    // 清除本机导出的诊断文件：安卓每次导出都会在缓存目录留一份 txt，这里配套清理。
+    const [canDeleteDiagnostics] = React.useState(() => canDeleteExportedDiagnostics());
+    const [diagnosticsDelete, setDiagnosticsDelete] = React.useState<'idle' | 'working' | 'done' | 'empty' | 'failed'>('idle');
+    const [deletedDiagnostics, setDeletedDiagnostics] = React.useState(0);
+    const deleteDiagnostics = async () => {
+        setDiagnosticsDelete('working');
+        try {
+            const count = await deleteExportedDiagnostics();
+            setDeletedDiagnostics(count);
+            setDiagnosticsDelete(count > 0 ? 'done' : 'empty');
+        } catch (error) {
+            console.warn('[Settings] diagnostics:delete-failed', error);
+            setDiagnosticsDelete('failed');
+        }
+    };
 
     return (
         <>
@@ -145,7 +186,38 @@ const HelpPage: React.FC<HelpPageProps> = ({ onOpenReleaseNotes, onOpenAiHelp, o
 
             <Group def={SUPPORT} bare>
                 <Row label={iconLabel(CircleHelp, t('aiHelp.openButton'))} onClick={onOpenAiHelp} />
-                <Row label={iconLabel(MessageCircle, t('help.joinDiscord'))} onClick={openDiscordInvite} />
+                {/* 诊断反馈：复制整段报告，或导出成 txt 交给系统分享。 */}
+                <Row
+                    label={iconLabel(FileText, diagnosticsCopied === 'copied'
+                        ? t('help.copyDiagnosticsCopied')
+                        : diagnosticsCopied === 'failed'
+                            ? t('help.copyDiagnosticsFailed')
+                            : t('help.copyDiagnostics'))}
+                    hint={t('help.copyDiagnosticsDescription')}
+                    onClick={() => void copyDiagnostics()}
+                />
+                <Row
+                    label={iconLabel(
+                        diagnosticsExport === 'working' ? Loader2 : (diagnosticsExport === 'shared' || diagnosticsExport === 'downloaded') ? Check : FileDown,
+                        diagnosticsExport === 'shared' ? t('help.exportDiagnosticsShared')
+                            : diagnosticsExport === 'downloaded' ? t('help.exportDiagnosticsDownloaded')
+                                : diagnosticsExport === 'failed' ? t('help.exportDiagnosticsFailed')
+                                    : t('help.exportDiagnostics'))}
+                    hint={t('help.exportDiagnosticsDescription')}
+                    onClick={() => void exportDiagnostics()}
+                />
+                {canDeleteDiagnostics && (
+                    <Row
+                        label={iconLabel(
+                            diagnosticsDelete === 'working' ? Loader2 : diagnosticsDelete === 'done' ? Check : Trash2,
+                            diagnosticsDelete === 'done' ? t('help.deleteDiagnosticsDone', { count: deletedDiagnostics })
+                                : diagnosticsDelete === 'empty' ? t('help.deleteDiagnosticsEmpty')
+                                    : diagnosticsDelete === 'failed' ? t('help.deleteDiagnosticsFailed')
+                                        : t('help.deleteDiagnostics'))}
+                        hint={t('help.deleteDiagnosticsDescription')}
+                        onClick={() => void deleteDiagnostics()}
+                    />
+                )}
                 {/* A QQ group has no link that opens it: the row gives its number to copy. */}
                 <Row label={iconLabel(Users, t('help.communityQq'))}>
                     <CopyValue value={QQ_COMMUNITY_GROUP_NUMBER} />

@@ -50,6 +50,8 @@
 
 import { noteGpuAnalysisUnit } from './gpuActivity';
 import { createScheduler, watchFrames, type UnitRequest } from './scheduler';
+import { isCapacitorAndroid } from '../../platform/runtime';
+import { loadAndroidModelWeights } from './androidModelWeights';
 
 const IDLE_MS = 120_000;
 /**
@@ -267,9 +269,13 @@ const spawn = (): Worker | null => {
 };
 
 const start = async (model: GpuModel): Promise<boolean> => {
-    const fetchWeights = model === 'htdemucs'
+    const electronFetch = model === 'htdemucs'
         ? window.electron?.getHtdemucsGpuWeights
         : window.electron?.getBeatThisGpuWeights && (() => window.electron!.getBeatThisGpuWeights!(model));
+    // Android 没有 Electron 主进程：权重由 FoliaAnalysisModels 插件经本地回环读出。
+    const fetchWeights = electronFetch ?? (isCapacitorAndroid()
+        ? () => loadAndroidModelWeights(model)
+        : null);
     if (typeof fetchWeights !== 'function') return false;
     // Not there only in a checkout without the models (both ship in the installer); asked again on the next track.
     makeRoom(model);

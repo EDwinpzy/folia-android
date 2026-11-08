@@ -7,7 +7,6 @@ import { useAppChromeStore } from '../../../stores/useAppChromeStore';
 import { useSearchNavigationStore } from '../../../stores/useSearchNavigationStore';
 import { useThemeSettingsStore } from '../../../stores/useThemeSettingsStore';
 import { useStageSettingsStore } from '../../../stores/useStageSettingsStore';
-import { usePlayerChromeSettingsStore } from '../../../stores/usePlayerChromeSettingsStore';
 import { useTranslation } from 'react-i18next';
 import {
     selectDisplayCoverUrl,
@@ -20,6 +19,7 @@ import {
 import { resolveLikeAvailability } from '../../../utils/playerLikeAvailability';
 import { canShuffleQueue } from '../../../utils/playbackNeighbors';
 import { buildAppOverlaysModel, type AppOverlaysDeps, type AppOverlaysModel } from './buildAppOverlaysModel';
+import { usePlayerChromeSettingsStore } from '../../../stores/usePlayerChromeSettingsStore';
 
 // src/components/app/overlays/useAppOverlaysModel.ts
 
@@ -39,6 +39,8 @@ export const useAppOverlaysModel = (deps: AppOverlaysDeps): AppOverlaysModel => 
     const cardPositioning = useNowPlayingCardLayoutStore(state => state.isPositioning);
     const currentView = useAppViewStore(state => state.view);
     const isPlayerChromeHidden = useAppChromeStore(state => state.isPlayerChromeHidden);
+    // 联动控制：控制条、命令面板按钮与右侧面板按钮共用原版「自动隐藏播放控制条」的这一刻状态。
+    const effectivePlayerChromeHidden = isPlayerChromeHidden;
     const isDevDebugOverlayVisible = useAppChromeStore(state => state.isDevDebugOverlayVisible);
     const isMemoryMonitorVisible = useAppChromeStore(state => state.isMemoryMonitorVisible);
     const isSearchOpen = useSearchNavigationStore(state => state.isSearchOpen);
@@ -101,7 +103,7 @@ export const useAppOverlaysModel = (deps: AppOverlaysDeps): AppOverlaysModel => 
         audioSrc,
         lyrics: displayLyrics,
         activePlaybackContext,
-        isPlayerChromeHidden,
+        isPlayerChromeHidden: effectivePlayerChromeHidden,
         playQueue,
         isFmMode,
         coverUrl: displayCoverUrl,
@@ -136,7 +138,7 @@ export const useAppOverlaysModel = (deps: AppOverlaysDeps): AppOverlaysModel => 
         audioSrc,
         displayLyrics,
         activePlaybackContext,
-        isPlayerChromeHidden,
+        effectivePlayerChromeHidden,
         playQueue,
         isFmMode,
         displayCoverUrl,

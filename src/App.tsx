@@ -4,6 +4,9 @@ import { useTranslation } from 'react-i18next';
 import { ChevronLeft } from 'lucide-react';
 import { loadCachedOrFetchCover } from './services/coverCache';
 import VisualizerRenderer from './components/visualizer/VisualizerRenderer';
+import NativeStageBridge from './components/visualizer/NativeStageBridge';
+import { registerNativeStageActions } from './services/nativeStageActions';
+import { setNativeStageTheme } from './services/nativeStageTheme';
 import CommandPalette from './components/command-palette/CommandPalette';
 import AddToPlaylistHost from './components/app/AddToPlaylistHost';
 import ScratchpadHost from './components/app/scratchpad/ScratchpadHost';
@@ -51,6 +54,8 @@ import WallToolsDockHost from './components/wall/WallToolsDock';
 import { buildPlayerViewFlags } from './components/app/presentation/buildPlayerViewFlags';
 import { buildVisualizerTheme } from './components/app/presentation/buildVisualizerTheme';
 import { createCoverUrlResolver } from './components/app/playback/createCoverUrlResolver';
+import { getSizedCoverUrl } from './utils/coverUrl';
+import { prewarmCoverImage } from './utils/coverPrewarm';
 import { createLyricsSetter } from './components/app/playback/createLyricsSetter';
 import { createLyricSegmentationActions } from './components/app/playback/createLyricSegmentationActions';
 import { useLyricWordSegmentation } from './hooks/useLyricWordSegmentation';
@@ -82,6 +87,7 @@ import { consumeProgrammaticPause, playbackFade } from './services/playbackFade'
 import { getSongArtistLabel, getSongCoverUrl } from './services/onlineMusic/songMetadata';
 import { isNavidromeEnabled } from './services/navidromeService';
 import { useAppNavigation } from './hooks/useAppNavigation';
+import { noteLibraryStep } from './nativeBridge/api/libraryTrace.js';
 import { useNeteaseLibrary } from './hooks/useNeteaseLibrary';
 import { useLibraryAccountController } from './library/app/useLibraryAccountController';
 import { createLibraryAccountSwitchCleanupPort } from './library/app/createLibraryAccountPort';
@@ -145,7 +151,8 @@ import { useOnlineSongMetadataHydration } from './hooks/useOnlineSongMetadataHyd
 import { resolveCommandPaletteSearchSource, resolveSearchSource, useSearchNavigationStore } from './stores/useSearchNavigationStore';
 import { useOnlineProviderAccountStore } from './stores/useOnlineProviderAccountStore';
 import { useShallow } from 'zustand/react/shallow';
-import { clampMediaVolume, toSafeRemoteUrl } from './utils/appPlaybackHelpers';
+import { clampMediaVolume, describePlaybackSource, toSafeRemoteUrl } from './utils/appPlaybackHelpers';
+import { noteOnlinePlaybackOutcome } from './utils/onlinePlaybackDiagnostics';
 import { hasLoopedToStart } from './services/playedTrackCache';
 import { getOnlineProviderIdForSong, isLocalPlaybackSong, isNavidromePlaybackSong, isStagePlaybackSong } from './utils/appPlaybackGuards';
 import { writeLyricOffset } from './utils/lyrics/lyricOffsetMemory';
@@ -198,6 +205,9 @@ import { useFoliumHostActions } from './mods/runtime/hostActions';
 import { refreshPrefetchAfterQueueEdit } from './services/prefetchService';
 import { FoliumStageLayerSlot } from './mods/folium/registries/stageLayers';
 import { runsOnWindows } from './utils/platform';
+import { useNativeBackButton } from './hooks/useNativeBackButton';
+import { useNativeMediaActions } from './hooks/useNativeMediaActions';
+import { useColorOsLyricFeed } from './hooks/useColorOsLyricFeed';
 
 const LOCAL_MUSIC_UPDATED_EVENT = 'folia-local-music-updated';
 const DEV_DEBUG_SHORTCUT_LABEL = 'Alt+Shift+D';
@@ -657,6 +667,10 @@ export default function App() {
     );
 
     const coverUrl = getCoverUrl();
+    // Android 移植：预热当前封面（列表/切歌时先解码，避免墙面与播放条白闪）。
+    useEffect(() => {
+        if (coverUrl) prewarmCoverImage(getSizedCoverUrl(coverUrl, 512));
+    }, [coverUrl]);
 
     // Theme Controller
     // manages current theme, daylight mode, and related actions like generating AI themes 
@@ -963,7 +977,14 @@ export default function App() {
 
     const localLibraryCatalog = useLocalLibraryCatalog(localSongs);
     const openHomeCollection = useCallback(
-        (collection: GridViewCollectionDescriptor) => navigateToCollection(collection, 'home'),
+        (collection: GridViewCollectionDescriptor) => {
+            noteLibraryStep('collection', 'open:home', {
+                source: String(collection.source ?? '?'),
+                type: String(collection.type ?? '?'),
+                id: String(collection.id ?? '?').slice(0, 40),
+            });
+            navigateToCollection(collection, 'home');
+        },
         [navigateToCollection],
     );
     const handleSaveLyricFilterPattern = useMemo(() => createLyricFilterPatternSaver({
@@ -1605,6 +1626,23 @@ export default function App() {
     const hasHifiTrack = useHifiTrackStore(state => state.current !== null);
 
     useElectronWindowChrome();
+    // Android：物理返回键 / 返回手势交给页面层级处理（桌面端是空操作）。
+    // Android + ColorOS 16+：把当前歌词时间线写进系统 MediaSession 元数据，
+    // 原生锁屏/AOD 歌词页就能跟着渲染（其它系统上这个钩子是空操作）。
+    useColorOsLyricFeed({
+        lyrics,
+        song: displaySong,
+        duration,
+    });
+    useNativeBackButton();
+    // Android：通知栏 / 耳机键的播放控制（桌面端没有原生通知媒体按钮，是空操作）。
+    useNativeMediaActions({
+        play: resumePlayback,
+        pause: pausePlayback,
+        toggle: () => togglePlay(),
+        next: () => { void handleNextTrack(); },
+        previous: () => { void handlePrevTrack(); },
+    });
     const {
         isPlayerView,
         shouldPauseVisualizerBackground,
@@ -2062,6 +2100,22 @@ export default function App() {
             void publishStagePlayerPlaybackUpdate();
         }
     }, [publishStagePlayerPlaybackUpdate]);
+
+    useEffect(() => {
+        setNativeStageTheme({
+            accent: theme.accentColor,
+            primary: theme.primaryColor,
+            secondary: theme.secondaryColor,
+            background: theme.backgroundColor,
+        });
+    }, [theme.accentColor, theme.backgroundColor, theme.primaryColor, theme.secondaryColor]);
+
+    useEffect(() => registerNativeStageActions({
+        toggle: togglePlay,
+        next: () => { void handleNextTrack(); },
+        previous: () => { void handlePrevTrack(); },
+        seek: (fraction) => seekMainAudio(fraction * usePlaybackStore.getState().duration),
+    }), [handleNextTrack, handlePrevTrack, seekMainAudio, togglePlay]);
 
     const handleMonetLyricLineSeek = useCallback((lyricTimeSec: number) => {
         if (isNowPlayingControlDisabled) {
@@ -2663,6 +2717,22 @@ export default function App() {
                 if (isHifiRoute()) return;
                 const audioElement = e.currentTarget;
                 const isActiveDeck = automix.isActiveDeck(audioElement);
+                // 诊断：播放失败时记下媒体错误码和地址种类（blob/远端+主机），
+                // 「取到链但播不出」与「地址本身失效」在报告里就能分开。
+                if (isActiveDeck) {
+                    const source = audioElement.currentSrc || audioElement.getAttribute('src') || '';
+                    const described = describePlaybackSource(source);
+                    noteOnlinePlaybackOutcome({
+                        stage: 'media', outcome: 'error',
+                        providerId: currentSong?.sourceRef?.kind === 'online' ? currentSong.sourceRef.providerId : 'local',
+                        songTitle: currentSong?.name,
+                        songArtist: (currentSong?.artists || []).map(artist => artist?.name).filter(Boolean).join(' / '),
+                        mediaId: currentSong?.id,
+                        kind: `media-error-${audioElement.error?.code ?? 'none'}`,
+                        code: audioElement.networkState,
+                        detail: `${described.kind}${described.host ? ':' + described.host : ''} srcLen=${source.length}`,
+                    });
+                }
                 const reportedDuration = Number.isFinite(audioElement.duration) && audioElement.duration > 0
                     ? audioElement.duration
                     : duration;
@@ -2870,6 +2940,7 @@ export default function App() {
                 onClick={handleContainerClick}
             >
                 <PlayerBottomBarLayoutContext.Provider value={currentView === 'player'}>
+                    <NativeStageBridge />
                     {shouldMountVisualizer && <VisualizerRenderer {...visualizerRendererModel} animateStyleSwitch />}
                 </PlayerBottomBarLayoutContext.Provider>
             </div>

@@ -225,9 +225,9 @@ QQ 二维码最多存活约 3 分钟。出向 WebSocket 期间 Durable Object �
 
 **登录能保持多久。** Serverless 的登录态装在加密令牌里，跟着 QQ 给的凭证寿命走，目前大约 3 天。后端 3.3.2 起有续期接口 `POST /api/qq/login/refresh`：Folia 网页版确认登录还在之后会问一次，之后开着时每小时问一次；离到期不到 6 小时时，后端才换一个新令牌，Folia 存下来接着用。所以只有在快到期的最后几个小时里开着 Folia 网页版，登录才会续上，续上之后又能用大约 3 天；从第一次扫码算起最多 30 天，之后要重新扫码。那几个小时里没有开着 Folia，或者后端低于 3.3.2，大约 3 天就要重扫。
 
-## 方案三：Docker Compose
+## 方案三：Docker Compose（上游桌面/Web 版）
 
-Folia 的完整 Docker 堆栈已经包含 `qq-api`，不需要单独安装 npm 包：
+Folia 的完整 Docker 堆栈已经包含 `qq-api`，不需要单独安装 npm 包。本 Android fork 不包含 `deploy/docker/`，以下命令和部署文件请在上游桌面/Web 仓库执行：
 
 ```bash
 cd deploy/docker
@@ -242,7 +242,7 @@ docker compose ps qq-api
 curl http://localhost:18080/qq/login/status
 ```
 
-Docker / NAS、HTTPS、反向代理和本地镜像验证见 [Docker 全栈部署文档](../deploy/docker/README.md)。QQ 服务的卷、环境变量和独立镜像说明见 [QQ API 容器文档](../deploy/docker/qq-api/README.md)。
+Docker / NAS、HTTPS、反向代理和本地镜像验证见 [上游 Docker 全栈部署文档](https://github.com/chthollyphile/folia-major/blob/main/deploy/docker/README.md)。QQ 服务的卷、环境变量和独立镜像说明见 [上游 QQ API 容器文档](https://github.com/chthollyphile/folia-major/blob/main/deploy/docker/qq-api/README.md)。
 
 ## 方案四：裸 Node.js
 

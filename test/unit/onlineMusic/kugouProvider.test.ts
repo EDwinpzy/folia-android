@@ -494,6 +494,24 @@ describe('kugouProvider', () => {
         });
     });
 
+    it('skips empty artist arrays so later singer fields are not lost', () => {
+        const nested = normalizeKugouSong({
+            FileHash: '8C2F0C043E99779C8910C78E43DBC42A',
+            SongName: '先说谎的人 (0.8X)',
+            authors: [],
+            singerinfo: [{ id: '8893172', name: '涵の心事.' }],
+        });
+        expect(nested.artists.map(artist => artist.name)).toEqual(['涵の心事.']);
+
+        const topLevel = normalizeKugouSong({
+            FileHash: 'D67DAA030838F1F0E9DC11CDCDB4DB5A',
+            SongName: '灰かぶり (灰姑娘)',
+            authors: [],
+            singer_name: '十明',
+        });
+        expect(topLevel.artists.map(artist => artist.name)).toEqual(['十明']);
+    });
+
     it('uses the FileName field returned by KuGou search results as the song title', () => {
         const song = normalizeKugouSong({
             FileHash: '8C2F0C043E99779C8910C78E43DBC42A',
@@ -1079,6 +1097,30 @@ describe('kugouProvider', () => {
         });
     });
 
+    it('marks the built-in liked playlist so home rows can read its songs directly', async () => {
+        requestMock.mockResolvedValueOnce({
+            data: {
+                info: [{
+                    type: 0,
+                    source: 1,
+                    listid: 2,
+                    name: '我喜欢',
+                    count: 41,
+                    global_collection_id: 'collection_3_user_2_0',
+                }],
+            },
+        });
+
+        const page = await kugouProvider.library?.getUserPlaylists?.('user', 50, 0);
+
+        expect(page?.items[0]).toMatchObject({
+            id: 'collection_3_user_2_0',
+            name: '我喜欢',
+            isLiked: true,
+            trackCount: 41,
+        });
+    });
+
     it('separates mixed user playlists from favorite albums', async () => {
         const response = {
             data: {
@@ -1322,6 +1364,28 @@ describe('kugouProvider', () => {
         });
     });
 
+
+    it('returns KuGou playlist tracks in the order the official client shows', async () => {
+        requestMock.mockResolvedValue({
+            data: {
+                count: 3,
+                songs: [
+                    { hash: 'HASH_A', name: 'First in API order', timelen: 1000 },
+                    { hash: 'HASH_B', name: 'Second in API order', timelen: 1000 },
+                    { hash: 'HASH_C', name: 'Third in API order', timelen: 1000 },
+                ],
+            },
+        });
+
+        const page = await kugouProvider.catalog?.getPlaylistTracks?.('collection_3_test', 30, 0);
+
+        // KuGou's API lists a playlist bottom-up while the client shows it top-down.
+        expect(page?.items.map(song => song.name)).toEqual([
+            'Third in API order',
+            'Second in API order',
+            'First in API order',
+        ]);
+    });
     it('normalizes the nested song shape returned by album catalog endpoints', async () => {
         requestMock.mockResolvedValue({
             total: 1,
@@ -1546,7 +1610,8 @@ describe('kugouProvider', () => {
 
         const liked = await kugouProvider.library?.getLikedSongIds?.('user');
 
-        expect(liked).toEqual({ ids: ['ABC123', 'DEF456'], whole: true });
+        // 接口自下而上返回，客户端自上而下展示：这里按客户端顺序反转。
+        expect(liked).toEqual({ ids: ['DEF456', 'ABC123'], whole: true });
         expect(requestMock).toHaveBeenNthCalledWith(1, 'user_playlist', {
             userid: 'user', page: 1, pagesize: 100,
         });
@@ -1582,7 +1647,8 @@ describe('kugouProvider', () => {
         const liked = await kugouProvider.library?.getLikedSongIds?.('user');
 
         expect(liked?.ids).toHaveLength(101);
-        expect(liked?.ids.at(-1)).toBe('PAGED-LAST');
+        // 反转后第一页的第一首落到末尾，所以客户端顺序下最后一条是第一页的 PAGED-0。
+        expect(liked?.ids.at(-1)).toBe('PAGED-0');
         expect(liked?.whole).toBe(true);
         expect(requestMock).toHaveBeenNthCalledWith(2, 'playlist_track_all', {
             id: 'collection_3_liked_test_paged', page: 1, pagesize: 100,
@@ -1655,8 +1721,7 @@ describe('kugouProvider', () => {
         ));
         await kugouProvider.library?.getLikedSongIds?.('web-session-user');
         requestMock.mockClear();
-        await kugouProvider.mutations?.likeSong?.(song, false);
-        expect(requestMock).not.toHaveBeenCalledWith('playlist_tracks_del', expect.anything());
+        await expect(kugouProvider.mutations?.likeSong?.(song, false)).rejects.toThrow(/did not show the track to remove/);
     });
 
     it('reads the liked songs from KuGou again when they are read twice in a row', async () => {
@@ -1673,7 +1738,7 @@ describe('kugouProvider', () => {
         await kugouProvider.library?.getLikedSongIds?.('user');
         const liked = await kugouProvider.library?.getLikedSongIds?.('user');
 
-        expect(liked?.ids).toEqual(['ABC123', 'DEF456']);
+        expect(liked?.ids).toEqual(['DEF456', 'ABC123']);
     });
 
     it('counts the liked songs by the count the list of playlists gives for the liked list, and gives none where it names none', async () => {
@@ -1771,9 +1836,9 @@ describe('kugouProvider', () => {
             providerId: 'kugou', id: 'cloud', type: 'cloud', coverUrl: 'avatar.jpg',
         });
         expect(requestMock).not.toHaveBeenCalled();
-    });
-
-    it('treats an unlike as done when the liked playlist does not contain the song', async () => {
+    // Android 移植：读回一直看不到这首歌时**抛错**，而不是假装已取消 —— 读取端延迟时假成功会让
+    // 用户以为取消了、APP 里却还在（现场反馈过）。
+    // Android 移植：读回一直看不到这首歌时**抛错**，而不是假装已取消 —— 读取端延迟时假成功会让\n    // 用户以为取消了、APP 里却还在（现场反馈过）。\n    it('reports an unlike it cannot locate instead of pretending it is done', async () => {
         requestMock
             .mockResolvedValueOnce({
                 data: {
@@ -1805,10 +1870,8 @@ describe('kugouProvider', () => {
         });
 
         // 服务端本来就没有这首歌，目标状态已经达成：不发删除请求，也不能抛错把心形卡在点亮状态。
-        await expect(kugouProvider.mutations?.likeSong?.(song, false)).resolves.toBeUndefined();
-        expect(requestMock).not.toHaveBeenCalledWith('playlist_tracks_del', expect.anything());
-        // 下结论之前必须绕过 10 秒缓存重扫一次。
-        expect(requestMock.mock.calls.filter(([endpoint]) => endpoint === 'playlist_track_all')).toHaveLength(2);
+        // 读回三次都看不到这首歌：报失败让用户重试，而不是假报成功。
+        await expect(kugouProvider.mutations?.likeSong?.(song, false)).rejects.toThrow(/did not show the track to remove/);
     });
 
     it('rejects unlike when the liked playlist has no global collection id', async () => {

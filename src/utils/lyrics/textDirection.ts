@@ -5,8 +5,9 @@ export type LyricTextDirection = 'ltr' | 'rtl';
 
 // Scripts written right to left. A letter from any other script is strong left-to-right; digits,
 // punctuation and spaces are neutral and skipped, like the first-strong rule of the Unicode
-// bidi algorithm (and the browser's dir="auto").
-const RTL_LETTER_RE = /[\p{Script=Arabic}\p{Script=Hebrew}\p{Script=Syriac}\p{Script=Thaana}\p{Script=Nko}\p{Script=Samaritan}\p{Script=Mandaic}\p{Script=Adlam}\p{Script=Hanifi_Rohingya}\p{Script=Yezidi}]/u;
+// bidi algorithm (and the browser's dir="auto"). Yezidi uses its Unicode block instead of a
+// Script property because Chromium 83's ICU data predates that property name.
+const RTL_LETTER_RE = /[\p{Script=Arabic}\p{Script=Hebrew}\p{Script=Syriac}\p{Script=Thaana}\p{Script=Nko}\p{Script=Samaritan}\p{Script=Mandaic}\p{Script=Adlam}\p{Script=Hanifi_Rohingya}\u{10E80}-\u{10EBF}]/u;
 const LETTER_RE = /\p{L}/u;
 
 /**

@@ -150,4 +150,3 @@ export const cardRect = (origin: Point, index: number, columns: number, spacing:
     const { width, height } = cardSize(spacing);
     return { left: origin.x + x, top: origin.y + y, right: origin.x + x + width, bottom: origin.y + y + height };
 };
-

@@ -64,6 +64,7 @@ export interface LumiereRuntimeOptions {
     staticMode: boolean;
     showText: boolean;
     paused: boolean;
+    reducedEffects?: boolean;
     metadata: LumiereSongMetadata;
     /** 分辨率倍数（乘在 resolveLumiereRenderResolution 上，画质档再从乘过的分辨率降图形组）；预览传 1。 */
     renderScale: LyricRenderScale;
@@ -142,7 +143,11 @@ export class LumierePixiRuntime {
         const app = new pixi.Application();
         const width = Math.max(options.host.clientWidth, MIN_WIDTH);
         const height = Math.max(options.host.clientHeight, MIN_HEIGHT);
-        const resolution = resolveLumiereScaledRenderResolution(window.devicePixelRatio, options.renderScale);
+        const resolution = resolveLumiereScaledRenderResolution(
+            window.devicePixelRatio,
+            options.renderScale,
+            options.reducedEffects,
+        );
         await app.init({
             width,
             height,
@@ -211,7 +216,11 @@ export class LumierePixiRuntime {
         if (this.destroyed) return false;
         const width = Math.max(this.options.host.clientWidth, MIN_WIDTH);
         const height = Math.max(this.options.host.clientHeight, MIN_HEIGHT);
-        const resolution = resolveLumiereScaledRenderResolution(window.devicePixelRatio, this.options.renderScale);
+        const resolution = resolveLumiereScaledRenderResolution(
+            window.devicePixelRatio,
+            this.options.renderScale,
+            this.options.reducedEffects,
+        );
         if (width === this.width && height === this.height && resolution === this.renderResolution) return false;
         this.width = width;
         this.height = height;
@@ -454,6 +463,14 @@ export class LumierePixiRuntime {
         Object.assign(this.sceneTuning, next);
         this.refreshQuality();
         if (requiresLumiereSceneRebuild(previous, next)) this.scheduleRebuild();
+    }
+
+    /** Change the TV pixel budget in place, retaining the current WebGL context and song. */
+    setReducedEffects(reducedEffects: boolean) {
+        if (this.destroyed || reducedEffects === Boolean(this.options.reducedEffects)) return;
+        this.options.reducedEffects = reducedEffects;
+        this.resizeToHost(false);
+        if (this.options.paused) this.renderOnce();
     }
 
     setStaticMode(staticMode: boolean) {

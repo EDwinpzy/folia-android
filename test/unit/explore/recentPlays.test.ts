@@ -125,21 +125,22 @@ describe('recent plays', () => {
         noteSongPlayed(song('a'), 'me');
         const first = recentPlaysOf('ytm', 'me');
         expect(watcher).toHaveBeenCalledTimes(1);
-        // The newest song is played again: the same list, and nobody told; only the time stored for it is new.
+        // The newest song is played again: this scope's list is the same, but its time is new, so
+        // histories merged from several scopes are told to read it again.
         vi.advanceTimersByTime(MINUTE);
         noteSongPlayed(song('a'), 'me');
         expect(recentPlaysOf('ytm', 'me')).toBe(first);
-        expect(watcher).toHaveBeenCalledTimes(1);
+        expect(watcher).toHaveBeenCalledTimes(2);
         expect(stored()['ytm:me']).toEqual([{ song: song('a'), at: START + MINUTE, heardAt: 0, days: [] }]);
         // A listening of it that is counted does change the record: the songs to play again may be others.
         noteSongListened(song('a'), 'me', SONG_MS, false);
-        expect(watcher).toHaveBeenCalledTimes(2);
+        expect(watcher).toHaveBeenCalledTimes(3);
         const listened = recentPlaysOf('ytm', 'me');
         expect(listened).not.toBe(first);
-        // One that is not counted (the same listening goes on) does not.
+        // One that is not counted (the same listening goes on) leaves the listenings alone, but its time moves.
         vi.advanceTimersByTime(MINUTE);
         noteSongListened(song('a'), 'me', SONG_MS, false);
-        expect(watcher).toHaveBeenCalledTimes(2);
+        expect(watcher).toHaveBeenCalledTimes(4);
         expect(recentPlaysOf('ytm', 'me')).toBe(listened);
         expect(stored()['ytm:me']).toEqual([{ song: song('a'), at: START + 2 * MINUTE, heardAt: START + MINUTE, days: [[TODAY, 1]] }]);
         watcher.mockClear();
@@ -149,17 +150,17 @@ describe('recent plays', () => {
         noteSongPlayed(song('new'), 'someone else');
         vi.advanceTimersByTime(DAY);
         noteSongPlayed(song('new'), 'someone else');
-        expect(watcher).toHaveBeenCalledTimes(2);
+        expect(watcher).toHaveBeenCalledTimes(3);
         vi.advanceTimersByTime(1);
         noteSongPlayed(song('new'), 'someone else');
-        expect(watcher).toHaveBeenCalledTimes(3);
+        expect(watcher).toHaveBeenCalledTimes(4);
         expect(stored()['ytm:someone else'].map(play => play.song.id)).toEqual(['new']);
         expect(idsOf(recentPlaysOf('ytm', 'someone else'))).toEqual(['new']);
         // Or once it was not played lately any more: it is again, so the list of those changes.
         vi.advanceTimersByTime(RECENT_PLAYS_KEPT_MS + 1);
         expect(recentPlaysOf('ytm', 'someone else')).toEqual([]);
         noteSongPlayed(song('new'), 'someone else');
-        expect(watcher).toHaveBeenCalledTimes(4);
+        expect(watcher).toHaveBeenCalledTimes(5);
         expect(idsOf(recentPlaysOf('ytm', 'someone else'))).toEqual(['new']);
         watcher.mockClear();
         storage.setItem.mockClear();
@@ -178,6 +179,21 @@ describe('recent plays', () => {
         stop();
         noteSongPlayed(song('c'), 'me');
         expect(watcher).toHaveBeenCalledTimes(1);
+    });
+
+    it('makes the new time of a newest play readable by histories merged across scopes', () => {
+        noteSongPlayed(song('latest'), 'me');
+        const records = recentPlayRecordsOf({ kind: 'online', providerId: 'ytm', accountId: 'me' });
+        expect(records[0].at).toBe(START);
+
+        const watcher = vi.fn();
+        const stop = watchRecentPlays(watcher);
+        later(MINUTE);
+        noteSongPlayed(song('latest'), 'me');
+
+        expect(watcher).toHaveBeenCalledTimes(1);
+        expect(records[0].at).toBe(START + MINUTE);
+        stop();
     });
 
     it('lists the recent plays with when each was last played, the same list until a play changes it', () => {
@@ -648,6 +664,7 @@ describe('recent plays', () => {
         // The video, still playing, goes on as the song: it is not recorded again, nor its listening counted twice.
         noteSongListened(song('video'), 'me', SONG_MS, false);
         expect(counts()).toEqual([['song', 2], ['other', 1]]);
+        expect(watcher).toHaveBeenCalledTimes(2);
         // Nothing answered: nothing is stored and nobody is told.
         const writes = storage.setItem.mock.calls.length;
         expect(await showRecordedSongsAs('ytm', 'me', async () => new Map())).toBe(0);
@@ -662,7 +679,7 @@ describe('recent plays', () => {
         expect(await showRecordedSongsAs('ytm', 'me', answer(new Map()))).toBe(0);
         expect(asked).toEqual([['song', 'other', 'video'], ['other']]);
         expect(counts()).toEqual([['song', 2], ['other', 1]]);
-        expect(watcher).toHaveBeenCalledTimes(1);
+        expect(watcher).toHaveBeenCalledTimes(2);
         stop();
     });
 });

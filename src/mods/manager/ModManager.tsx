@@ -7,6 +7,8 @@ import { DEFAULT_THEME } from '@/services/baseThemes';
 import { useModsStore } from '../useModsStore';
 import { FOLIUM_HOST_VERSION } from '../folium/shared';
 import { useDesktopSettingsStore } from '../../stores/useDesktopSettingsStore';
+import { importAndroidModZip } from '../android/androidModsBridge';
+import { IS_ANDROID_WEBVIEW } from '../../utils/platform';
 import { openOutsideLink, opensThroughDesktopApp } from '../../utils/system/outsideLink';
 import { ModListItem, translateModError } from './ModListItem';
 import { useModCosts } from './modCost';
@@ -65,6 +67,24 @@ export const ModManager: React.FC<ModManagerProps> = ({ classes, isDaylight, the
     // whole panel; combined with pointer-events-none on the overlay it stays steady.
     const dragDepthRef = useRef(0);
     const canInstall = bridgeAvailable && modSystemEnabled;
+
+    const importAndroidZip = async () => {
+        if (!canInstall || installing) return;
+        setInstalling(true);
+        setNotice(null);
+        try {
+            const result = await importAndroidModZip();
+            if (result.canceled) return;
+            if (!result.imported) {
+                setNotice({ kind: 'error', text: result.error || t('mods.androidIncompatible') });
+                return;
+            }
+            await refresh();
+            setNotice({ kind: 'ok', text: t('mods.installSuccess', { id: result.imported }) });
+        } finally {
+            setInstalling(false);
+        }
+    };
 
     // The main process loads or unloads every mod when the master switch flips, so the list is
     // re-read then as well as on mount.
@@ -214,12 +234,12 @@ export const ModManager: React.FC<ModManagerProps> = ({ classes, isDaylight, the
     return (
         <div
             className="relative flex flex-col gap-3"
-            onDragEnter={handleDragEnter}
-            onDragOver={(event) => event.preventDefault()}
-            onDragLeave={handleDragLeave}
-            onDrop={handleDropZip}
+            onDragEnter={IS_ANDROID_WEBVIEW ? undefined : handleDragEnter}
+            onDragOver={IS_ANDROID_WEBVIEW ? undefined : (event) => event.preventDefault()}
+            onDragLeave={IS_ANDROID_WEBVIEW ? undefined : handleDragLeave}
+            onDrop={IS_ANDROID_WEBVIEW ? undefined : handleDropZip}
         >
-            {isDragging ? (
+            {!IS_ANDROID_WEBVIEW && isDragging ? (
                 <motion.div
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
@@ -241,15 +261,29 @@ export const ModManager: React.FC<ModManagerProps> = ({ classes, isDaylight, the
                 </span>
                 <div className="flex flex-wrap items-center gap-1.5">
                     {marketLink}
-                    <button
-                        type="button"
-                        onClick={() => { void handleOpenDirectory(); }}
-                        className={`${toolbarButtonClass} ${classes.ghostButton}`}
-                        style={{ color: 'var(--text-primary)' }}
-                    >
-                        <FolderOpen size={12} />
-                        {t('mods.openDirectory')}
-                    </button>
+                    {IS_ANDROID_WEBVIEW && (
+                        <button
+                            type="button"
+                            onClick={() => { void importAndroidZip(); }}
+                            disabled={installing}
+                            className={`${toolbarButtonClass} ${classes.ghostButton}`}
+                            style={{ color: 'var(--text-primary)' }}
+                        >
+                            <Upload size={12} />
+                            {installing ? t('mods.installing') : t('mods.androidImport')}
+                        </button>
+                    )}
+                    {!IS_ANDROID_WEBVIEW && (
+                        <button
+                            type="button"
+                            onClick={() => { void handleOpenDirectory(); }}
+                            className={`${toolbarButtonClass} ${classes.ghostButton}`}
+                            style={{ color: 'var(--text-primary)' }}
+                        >
+                            <FolderOpen size={12} />
+                            {t('mods.openDirectory')}
+                        </button>
+                    )}
                     <button
                         type="button"
                         onClick={() => (selectionMode ? exitSelectionMode() : setSelectionMode(true))}

@@ -1,3 +1,4 @@
+import { noteAudioContext } from '../../../../utils/mediaDiagnostics';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import type { MutableRefObject, RefObject } from 'react';
 import { PlayerState } from '../../../../types';
@@ -179,8 +180,10 @@ export function usePlaybackAudioBridge({
         if (!audioRef.current || audioContextRef.current) return;
         try {
             const AudioContextClass = window.AudioContext || (window as Window & typeof globalThis & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-            const ctx = new AudioContextClass();
+            // 音乐播放要稳定优先：安卓 WebView 的 interactive 默认缓冲在负载下容易 underrun（爆音/咔哒）。
+            const ctx = new AudioContextClass({ latencyHint: 'playback' });
             audioContextRef.current = ctx;
+            noteAudioContext(ctx, 'playback');
             void applySavedAudioOutputToContext(ctx, useAudioSettingsStore.getState().audioOutputDeviceId);
 
             const analyser = ctx.createAnalyser();

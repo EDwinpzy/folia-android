@@ -3,19 +3,22 @@ import { useTranslation } from 'react-i18next';
 import { ModManager } from '../../../../mods/manager/ModManager';
 import type { ModManagerClasses } from '../../../../mods/manager/modManagerClasses';
 import { useDesktopSettingsStore } from '../../../../stores/useDesktopSettingsStore';
-import { Group, Row, Status, Toggle, option, useSettingsKitTheme, type SettingsGroupDef, type SettingsOptionDef } from '../kit';
+import { Group, Row, Select, Status, Toggle, option, useSettingsKitTheme, type SettingsGroupDef, type SettingsOptionDef } from '../kit';
 import { SettingsAnchor } from '../navigation/SettingsAnchorContext';
+import { IS_ANDROID_WEBVIEW } from '../../../../utils/platform';
 
 // src/components/modal/settings/pages/ModsPage.tsx
 // The 模组 page (desktop app only): the mod system's master switch, and under it the mod manager.
 // The manager is the one component the command palette's mods surface also shows
 // (src/mods/manager); here it wears the settings window's colours.
 
-const SYSTEM: SettingsGroupDef = { id: 'modSystem', titleKey: 'options.enableModSystem', electronOnly: true };
-const MANAGER: SettingsGroupDef = { id: 'modList', titleKey: 'mods.title', electronOnly: true };
+const SYSTEM: SettingsGroupDef = { id: 'modSystem', titleKey: 'options.enableModSystem' };
+const MANAGER: SettingsGroupDef = { id: 'modList', titleKey: 'mods.title' };
 
 const O = {
     enabled: option(SYSTEM, 'enableModSystem', 'options.enableModSystem'),
+    resolution: option(SYSTEM, 'modResolutionGuard', 'options.modResolutionGuard', { available: () => IS_ANDROID_WEBVIEW }),
+    resolutionLevel: option(SYSTEM, 'modResolutionGuardLevel', 'options.modResolutionGuardLevel', { available: () => IS_ANDROID_WEBVIEW }),
     // Drawn by the manager, not as a row: a search hit lands on the group.
     market: option(MANAGER, 'modMarket', 'mods.market'),
 };
@@ -45,6 +48,10 @@ const ModsPage: React.FC = () => {
     const { isDaylight, theme } = useSettingsKitTheme();
     const enabled = useDesktopSettingsStore(state => state.modSystemEnabled);
     const setEnabled = useDesktopSettingsStore(state => state.handleToggleModSystem);
+    const resolutionGuard = useDesktopSettingsStore(state => state.modResolutionGuardEnabled);
+    const setResolutionGuard = useDesktopSettingsStore(state => state.handleToggleModResolutionGuard);
+    const resolutionLevel = useDesktopSettingsStore(state => state.modResolutionGuardLevel);
+    const setResolutionLevel = useDesktopSettingsStore(state => state.handleSetModResolutionGuardLevel);
     const managerTitle = t(MANAGER.titleKey);
 
     return (
@@ -54,6 +61,26 @@ const ModsPage: React.FC = () => {
                     <Status tone="warn">{t('mods.experimental')}</Status>
                     <Toggle checked={enabled} onChange={setEnabled} />
                 </Row>
+                {IS_ANDROID_WEBVIEW && (
+                    <>
+                        <Row option={O.resolution} hint={t('options.modResolutionGuardDesc')} note={t('options.modResolutionGuardDescSub')}>
+                            <Toggle checked={resolutionGuard} onChange={setResolutionGuard} />
+                        </Row>
+                        {resolutionGuard && (
+                            <Row option={O.resolutionLevel} hint={t('options.modResolutionGuardLevelDesc')}>
+                                <Select
+                                    value={resolutionLevel}
+                                    options={[
+                                        { value: 'light', label: t('options.modResolutionGuardLight') },
+                                        { value: 'medium', label: t('options.modResolutionGuardMedium') },
+                                        { value: 'strong', label: t('options.modResolutionGuardStrong') },
+                                    ]}
+                                    onChange={setResolutionLevel}
+                                />
+                            </Row>
+                        )}
+                    </>
+                )}
             </Group>
 
             {/* The manager draws cards of its own, so this group is a heading over them, not a kit card. */}

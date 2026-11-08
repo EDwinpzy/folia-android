@@ -2,14 +2,18 @@ import React from 'react';
 import { RefreshCw } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useShallow } from 'zustand/react/shallow';
+import { useAndroidLayoutSettingsStore } from '../../../../stores/useAndroidLayoutSettingsStore';
+import { IS_ANDROID_WEBVIEW } from '../../../../utils/platform';
 import type { AppLanguagePreference } from '../../../../i18n/config';
 import { useAudioSettingsStore } from '../../../../stores/useAudioSettingsStore';
 import { usePlayerChromeSettingsStore } from '../../../../stores/usePlayerChromeSettingsStore';
+import { useDesktopSettingsStore } from '../../../../stores/useDesktopSettingsStore';
 import { selectPonderSettingsSnapshot, usePonderStore } from '../../../../stores/usePonderStore';
 import { useSettingsModalStore } from '../../../../stores/useSettingsModalStore';
 import { Button, Group, Reveal, Row, Segmented, Select, Toggle, option, type SettingsGroupDef, type SettingsOptionDef } from '../kit';
 import { FoundUpdateRow } from './FoundUpdateRow';
 import { ChinaDrivesRow } from './ChinaDrivesRow';
+import AnalysisModelsGroup from './AnalysisModelsGroup';
 import { useSettingsPage } from './settingsPageContext';
 
 // src/components/modal/settings/pages/GeneralPage.tsx
@@ -21,6 +25,8 @@ const LANGUAGE: SettingsGroupDef = { id: 'languageSettings', titleKey: 'options.
 const LAUNCH: SettingsGroupDef = { id: 'labWindowAndTools', titleKey: 'options.settingsHeadingLaunch' };
 const UPDATE: SettingsGroupDef = { id: 'updateCheck', titleKey: 'options.updateCheck', electronOnly: true };
 const PONDER: SettingsGroupDef = { id: 'ponderHints', titleKey: 'options.ponderHints' };
+// Android 外壳：只有 Capacitor WebView 里这些开关才有意义（桌面上整组不渲染）。
+const ANDROID_SHELL: SettingsGroupDef = { id: 'androidShell', titleKey: 'options.settingsHeadingAndroid' };
 
 const O = {
     language: option(LANGUAGE, 'appLanguage', 'options.appLanguage'),
@@ -32,6 +38,11 @@ const O = {
     updateChannel: option(UPDATE, 'updateChannel', 'options.updateChannel'),
     ponderHints: option(PONDER, 'ponderHintVisibility', 'options.ponderHints'),
     ponderTouchButton: option(PONDER, 'ponderTouchButton', 'options.ponderTouchButton'),
+    androidAdaptiveDisplay: option(ANDROID_SHELL, 'adaptiveDisplay', 'options.adaptiveDisplay'),
+    androidKeepScreenOn: option(ANDROID_SHELL, 'keepScreenOn', 'options.keepScreenOn'),
+    androidPhoneFit: option(ANDROID_SHELL, 'phoneFit', 'options.phoneFit'),
+    androidOrientation: option(ANDROID_SHELL, 'orientationFit', 'options.orientationFit'),
+    androidNativeStage: option(ANDROID_SHELL, 'nativeStage', 'options.nativeStage'),
 };
 
 export const OPTIONS: SettingsOptionDef[] = Object.values(O);
@@ -42,6 +53,35 @@ const GeneralPage: React.FC = () => {
     const { openPlayerOnLaunch, onToggleOpenPlayerOnLaunch } = viewProps.desktop.preferences;
     const update = viewProps.desktop.model;
     const { electronSettings, updateStatus } = update;
+    // Android 移植：这几个设置只有原生壳里有效，桌面上组件自己返回 null。
+    // Android 外壳的设置：store 里的三个开关 + 原生「自适应分辨率」（插件状态）。
+
+    const keepScreenOnEnabled = useAndroidLayoutSettingsStore(state => state.keepScreenOnEnabled);
+    const setKeepScreenOnEnabled = useAndroidLayoutSettingsStore(state => state.setKeepScreenOnEnabled);
+    const phoneFitEnabled = useAndroidLayoutSettingsStore(state => state.phoneFitEnabled);
+    const setPhoneFitEnabled = useAndroidLayoutSettingsStore(state => state.setPhoneFitEnabled);
+    const phoneFitOrientation = useAndroidLayoutSettingsStore(state => state.phoneFitOrientation);
+    const setPhoneFitOrientation = useAndroidLayoutSettingsStore(state => state.setPhoneFitOrientation);
+    const nativeStageEnabled = useDesktopSettingsStore(state => state.nativeStageEnabled);
+    const setNativeStageEnabled = useDesktopSettingsStore(state => state.handleToggleNativeStage);
+    const [adaptiveDisplayEnabled, setAdaptiveDisplayEnabled] = React.useState(false);
+    React.useEffect(() => {
+        if (!IS_ANDROID_WEBVIEW) return;
+        const plugin = (window as unknown as { Capacitor?: { Plugins?: { FoliaNative?: {
+            getAdaptiveLayout?: () => Promise<{ enabled?: boolean }>;
+        } } } }).Capacitor?.Plugins?.FoliaNative;
+        void plugin?.getAdaptiveLayout?.().then(result => setAdaptiveDisplayEnabled(Boolean(result?.enabled))).catch(() => undefined);
+    }, []);
+    const toggleAdaptiveDisplay = async (next: boolean) => {
+        setAdaptiveDisplayEnabled(next);
+        const plugin = (window as unknown as { Capacitor?: { Plugins?: { FoliaNative?: {
+            setAdaptiveLayout?: (options: { enabled: boolean }) => Promise<unknown>;
+        } } } }).Capacitor?.Plugins?.FoliaNative;
+        try { await plugin?.setAdaptiveLayout?.({ enabled: next }); } catch (error) {
+            console.warn('[Settings] adaptive-display:set-failed', error);
+            setAdaptiveDisplayEnabled(!next);
+        }
+    };
     const languagePreference = useSettingsModalStore(state => state.appLanguagePreference);
     const setLanguagePreference = useSettingsModalStore(state => state.handleSetAppLanguagePreference);
     const autoPlay = useAudioSettingsStore(state => state.autoPlayOnLaunch);
@@ -100,6 +140,37 @@ const GeneralPage: React.FC = () => {
                 </Row>
             </Group>
 
+            {/* Android 外壳：与上游设置页同一套 Group/Row 控件，桌面上整组不渲染。 */}
+            {IS_ANDROID_WEBVIEW && (
+                <Group def={ANDROID_SHELL}>
+                    <Row option={O.androidAdaptiveDisplay} hint={t('options.adaptiveDisplayDesc')}>
+                        <Toggle checked={adaptiveDisplayEnabled} onChange={next => void toggleAdaptiveDisplay(next)} />
+                    </Row>
+
+                    <Row option={O.androidKeepScreenOn} hint={t('options.keepScreenOnDesc')}>
+                        <Toggle checked={keepScreenOnEnabled} onChange={setKeepScreenOnEnabled} />
+                    </Row>
+                    <Row option={O.androidPhoneFit} hint={t('options.phoneFitDesc')}>
+                        <Toggle checked={phoneFitEnabled} onChange={setPhoneFitEnabled} />
+                    </Row>
+                    <Row option={O.androidNativeStage} hint={t('options.nativeStageDesc')} note={t('options.nativeStageDescSub')}>
+                        <Toggle checked={nativeStageEnabled} onChange={setNativeStageEnabled} />
+                    </Row>
+                    <AnalysisModelsGroup />
+                    {phoneFitEnabled && (
+                        <Row option={O.androidOrientation} hint={t('options.orientationFitDesc')}>
+                            <Segmented
+                                value={phoneFitOrientation}
+                                options={[
+                                    { value: 'portrait', label: t('options.orientationPortrait') },
+                                    { value: 'landscape', label: t('options.orientationLandscape') },
+                                ]}
+                                onChange={setPhoneFitOrientation}
+                            />
+                        </Row>
+                    )}
+                </Group>
+            )}
             {isElectron && (
                 <Group
                     def={UPDATE}

@@ -87,14 +87,16 @@ type HifiProgressRowProps = {
     disabled?: boolean;
     /** 进度条（两头的时间加中间的条）。 */
     children: React.ReactNode;
+    /** Android 手机适配用它定位进度行；桌面路线不传。 */
+    'data-folia-player-bar-progress'?: string;
 };
 
 /**
  * HiFi 路线上胶囊的进度行：进度条在前、小牌子在后。这一行是小牌子量宽度的容器；进度条至少留 10rem（两头的时间
  * 共 88px，条本身至少 72px），小牌子在更窄的地方自己截断，挤不掉进度条。
  */
-export const HifiProgressRow: React.FC<HifiProgressRowProps> = ({ className, isDaylight, disabled, children }) => (
-    <div className={`${className} @container flex items-center gap-2`}>
+export const HifiProgressRow: React.FC<HifiProgressRowProps> = ({ className, isDaylight, disabled, children, ...rest }) => (
+    <div className={`${className} @container flex items-center gap-2`} {...rest}>
         <div className="min-w-40 flex-1">{children}</div>
         <HifiBadge isDaylight={isDaylight} disabled={disabled} />
     </div>

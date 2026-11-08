@@ -320,11 +320,16 @@ Visualizer 消费已解析的 `LyricData` / `Line` / `Word`，不负责解析 `.
 
 换样式的过渡（`styleTransition/`）只在用的人亲手换样式的宿主里放：`App.tsx` 和 `VisPlayground.tsx` 给 `VisualizerRenderer` 传 `animateStyleSwitch`，其余宿主直接换。过渡动的是背景里面的样式那一层，视频层和模组舞台图层（都在 `VisualizerBackdrop.tsx`）不动；静态模式和降低「界面微动效」时也直接换。过渡是柔焦（`styleTransition/softFocus.ts`）：旧样式放大一点、虚化退下，新样式从同样的虚化里落定。背景换了也放同一个过渡（`styleTransition/VisualizerBackgroundTransition.tsx`）：换背景种类、新样式画在另一种背景上（Still 不画背景）、播放页设成透明，都算换；同一种背景里的设置不算，背景原地重画。换歌也算，只要背景画的东西跟着歌变（背景 entry 的 `song`，见上面的背景一节）：新歌的那一份马上挂上但先不露面，退下的那一份照旧画旧歌的封面和种子。换样式和换背景在同一次渲染里开始，一起换时是一个过渡。两者共用 `styleTransition/layerTransition.ts`：同时最多挂两个，退下的那个等不到动画结束也会在稍后卸下。换样式时新样式马上挂上但先不露面，旧样式原样留着，等新样式画好第一帧（`styleTransition/firstFrame.ts`，见上面的“起步慢的样式”）再一起放过渡，最多等 `FIRST_FRAME_LIMIT_MS`；跟着这次换样式一起换的背景也等着；背景自己也等新的那一份准备好（同样用 `useFirstFrameDrawn`），最多等 `BACKGROUND_READY_LIMIT_MS`。等着和放过渡的时候，选择器的小图不开始做图也不开始动（`preview/pictureTurns.ts` 的 `holdTurns`）。
 
+TV 播放页通过 `reducedEffects` 为 classic / partita 启用轻量歌词：每个词只保留一个普通文本节点，不再创建 Framer 动画节点、逐字光晕、阴影或逐词过渡；词边界只离散更新颜色、透明度和位置。Classic 的低配切句也直接替换文本，不保留 `popLayout`、模糊或持续缩放。其他宿主默认保留完整效果。低配置 TV 还会将背景的 `staticMode` 打开，复用各背景已有的静态展示路径，减少与歌词争用绘制资源。
+
+绘光在 TV 上同样消费 `reducedEffects`，将低配输出画布限制到 0.8 倍像素预算；共享 Pixi 上下文内可直接切换该预算。TV 入口不启用全局 30 FPS 门控，因为投影仪偶发丢帧时它会与渲染周期错拍；实机采样中解除门控后帧率与 `p95` 帧间隔都明显改善。TV 画质由 `src/tv/model/tvVisualTheme.ts` 提供：低配置启用低画质图形组、关闭两套多遍 bloom 与前景散景，并减少浮尘、背景歌词及邻行；普通 TV 使用均衡画质。歌词时间轴、排版、光束与运镜仍由原绘光运行时负责。
+
 ## Runtime guardrails
 
 - 连续播放时间优先使用 MotionValue、ref、CSS/Motion、canvas 或 Pixi draw loop；不要每帧写 React state/store。
 - React state 只保存当前行、播放状态、可见段落等离散变化；高频 `requestAnimationFrame`、`useMotionValueEvent`、`ResizeObserver` 必须有相等保护和 cleanup。
 - 布局 cache key 要包含歌词内容、主题、最终字重、窗口尺寸和 mode tuning；字体测量和最终渲染必须使用同一 `resolveThemeFontWeight` 结果。
+- 低配 Android 投影仪对 Latent / Nomand 的 Paper shader 使用统一像素预算（480×270）；层、颜色、音频响应和设置全部保留，只降低 shader 内部绘制分辨率。
 - 新模式应复用 `runtime.ts`、`registry.tsx`、`VisualizerShell.tsx`、共享 subtitle/harmony overlay 和 `entry.tsx` settings contract；接入步骤见上面的“加一个歌词动画样式”。
 - 新功能若让单个模式文件继续明显膨胀，加载 `file-modularization` skill，把 layout、canvas/Pixi、tuning 和纯计算拆到同目录文件。
 

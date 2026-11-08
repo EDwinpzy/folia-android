@@ -2,8 +2,11 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import './i18n/config';
 import './index.css';
+import './styles/androidPhoneFit.css';
 import App from './App';
 import AppSplashGate from './components/AppSplashGate';
+import ChunkLoadBoundary from './components/app/ChunkLoadBoundary';
+import { installPlaybackHeartbeat } from './services/playbackHeartbeat';
 import RemoteControlApp from './components/remote/RemoteControlApp';
 import ObsBrowserSourceApp from './components/obs/ObsBrowserSourceApp';
 import ObsNowPlayingSourceApp from './components/obs/ObsNowPlayingSourceApp';
@@ -12,6 +15,7 @@ import { initializeLocalCoverRuntime } from './services/localCoverRuntime';
 import { installFoliumHomePageDismissal } from './components/app/home/foliumHomePageDismissal';
 import { installLibrarySuiteChromeCommands } from './library/app/installLibrarySuiteChromeCommands';
 import { noteFoliumFirstScreenMounted, startFoliumForMainWindow } from './mods/runtime/mainWindowStart';
+import { installModResolutionGuard } from './mods/runtime/modResolutionGuard';
 import { installNativeDragGuard } from './utils/nativeDragGuard';
 import { prewarmSavedVisualizer, prewarmVisualizersWhenIdle } from './components/visualizer/prewarmVisualizers';
 import { bootNavidromeServerPreset } from './services/navidromeServerPreset';
@@ -72,7 +76,8 @@ const FirstScreenMounted: React.FC<{ children: React.ReactNode }> = ({ children 
 
 const renderApp = () => root.render(
     <React.StrictMode>
-      <AppSplashGate>
+      <ChunkLoadBoundary>
+        <AppSplashGate>
         {isNowPlayingObsSource
           ? <ObsNowPlayingSourceApp />
           : isPlayerCapObsSource
@@ -82,13 +87,16 @@ const renderApp = () => root.render(
               : isRemoteControl
                 ? <RemoteControlApp />
                 : <FirstScreenMounted><App /></FirstScreenMounted>}
-      </AppSplashGate>
+        </AppSplashGate>
+      </ChunkLoadBoundary>
     </React.StrictMode>
   );
 
 // Library suites declare their chrome actions in their manifests; the palette cannot import the
 // registry, so the commands are put into its list here, before anything renders (main window only,
 // like the mod commands below). A clashing execute shortcut throws here, at startup.
+// Android 移植：播放心跳（前台服务/通知状态刷新）。桌面上是空操作。
+if (isMainApp) installPlaybackHeartbeat();
 if (isMainApp) installLibrarySuiteChromeCommands();
 
 // 保存的歌词样式可以趁首屏加载遮罩还在时先准备（雾笺在后台编着色器，见 visualizer/prewarmVisualizers.ts）。
@@ -97,6 +105,8 @@ if (isMainApp) prewarmSavedVisualizer();
 
 const bootFolium = async () => {
     if (!isMainApp) return;
+    // 模组画面分辨率保护：跟随设置开关，只压模组 canvas，不限制帧率。
+    installModResolutionGuard();
     // 显式打开集合时关掉开着的模组首页页面；与 Home 挂没挂着无关，所以在这里装（见 foliumHomePageDismissal）。
     installFoliumHomePageDismissal();
     await startFoliumForMainWindow({ firstScreenWaitMs: FIRST_SCREEN_MOD_WAIT_MS });

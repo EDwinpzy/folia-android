@@ -736,6 +736,12 @@ export interface OnlineAuthProvider {
      */
     signInRanOut?(): void | Promise<void>;
     /**
+     * 一次 getLoginStatus 没拿到人不足以判定掉登录（EAPI 抖动、空 data、请求没带凭据都会如此），
+     * 而清会话不可逆。有这一步的平台在这里隔一会儿再确认一次，只有第二次也确认没登录才返回 null。
+     * 省略表示按一次结果处理。见 account/accountRead.ts。
+     */
+    confirmSessionLoss?(): Promise<ProviderUser | null>;
+    /**
      * True where the sign-in goes with what this page keeps of the account: the account kept on
      * disk is shown at once at app start, while the platform is asked who is signed in, and while
      * nobody is shown the account shows as being found out. Without it nothing kept is shown
@@ -1165,6 +1171,11 @@ export interface OnlineMusicProvider {
     normalizeCollection?(raw: unknown, type?: string): ProviderCollection;
     songMetadata?: OnlineSongMetadataProvider;
     getSongPageUrl?(song: SongResult): string | null;
+    /**
+     * 安卓上要把播放地址经原生 HTTP 桥拉成同源 blob 再播：这个平台的音频 CDN 不回 CORS 头，
+     * 而播放器的 <audio> 带 crossOrigin=anonymous 又接 WebAudio 分析，直接用平台地址会「取到链但播不出声」。
+     */
+    requiresSameOriginAudio?: boolean;
     search?: OnlineSearchProvider;
     playback?: OnlinePlaybackProvider;
     /** A player outside this app that sounds this provider's songs (see the capability of the same name). */

@@ -20,6 +20,13 @@ export const VOICE_INPUT_PAUSE_STORAGE_KEY = 'voice_input_pause_enabled';
 export const PREVENT_DISPLAY_SLEEP_DURING_PLAYBACK_STORAGE_KEY = 'prevent_display_sleep_during_playback';
 
 export const MOD_SYSTEM_ENABLED_STORAGE_KEY = 'mod_system_enabled';
+export const MOD_RESOLUTION_GUARD_STORAGE_KEY = 'mod_resolution_guard_enabled';
+export const MOD_RESOLUTION_GUARD_LEVEL_STORAGE_KEY = 'mod_resolution_guard_level';
+export const NATIVE_STAGE_STORAGE_KEY = 'native_stage_enabled';
+export type ModResolutionGuardLevel = 'light' | 'medium' | 'strong';
+const readModResolutionGuardLevel = (value: unknown): ModResolutionGuardLevel => (
+    value === 'light' || value === 'strong' ? value : 'medium'
+);
 
 export const HIDE_TASKBAR_ICON_STORAGE_KEY = 'hide_taskbar_icon';
 
@@ -72,6 +79,12 @@ export type DesktopSettingsState = {
      * the palette, so an unfinished apiVersion 1 is opt-in rather than ambient.
      */
     modSystemEnabled: boolean;
+    /** 只压模组 canvas 的分辨率，不限制帧率；默认关闭。 */
+    modResolutionGuardEnabled: boolean;
+    /** 开启后的压制强度：轻度 75%、均衡 50%、强力 35%。 */
+    modResolutionGuardLevel: ModResolutionGuardLevel;
+    /** Android 实验：播放页背景和歌词改由原生 View 渲染；关闭即回退 WebView。 */
+    nativeStageEnabled: boolean;
     hideTaskbarIcon: boolean;
     hideRemoteControlTaskbarIcon: boolean;
     /** Remote control window: never reveal the top floating window-control bar. */
@@ -106,6 +119,9 @@ export type DesktopSettingsState = {
     handleToggleCloseToTray: (enable: boolean) => void;
     handleToggleVoiceInputPause: (enable: boolean) => void;
     handleToggleModSystem: (enable: boolean) => void;
+    handleToggleModResolutionGuard: (enable: boolean) => void;
+    handleSetModResolutionGuardLevel: (level: ModResolutionGuardLevel) => void;
+    handleToggleNativeStage: (enable: boolean) => void;
     handleTogglePreventDisplaySleepDuringPlayback: (enable: boolean) => void;
     handleToggleHideTaskbarIcon: (enable: boolean) => void;
     handleToggleHideRemoteControlTaskbarIcon: (enable: boolean) => void;
@@ -135,6 +151,9 @@ export const useDesktopSettingsStore = create<DesktopSettingsState>((set, get) =
     voiceInputPauseEnabled: getStoredBoolean(VOICE_INPUT_PAUSE_STORAGE_KEY, false),
     preventDisplaySleepDuringPlayback: getStoredBoolean(PREVENT_DISPLAY_SLEEP_DURING_PLAYBACK_STORAGE_KEY, false),
     modSystemEnabled: getStoredBoolean(MOD_SYSTEM_ENABLED_STORAGE_KEY, false),
+    modResolutionGuardEnabled: getStoredBoolean(MOD_RESOLUTION_GUARD_STORAGE_KEY, false),
+    modResolutionGuardLevel: readModResolutionGuardLevel(getStoredString(MOD_RESOLUTION_GUARD_LEVEL_STORAGE_KEY, 'medium')),
+    nativeStageEnabled: getStoredBoolean(NATIVE_STAGE_STORAGE_KEY, false),
     hideTaskbarIcon: getStoredBoolean(HIDE_TASKBAR_ICON_STORAGE_KEY, false),
     hideRemoteControlTaskbarIcon: getStoredBoolean(REMOTE_CONTROL_SKIP_TASKBAR_STORAGE_KEY, false),
     hideRemoteControlTitlebar: getStoredBoolean(REMOTE_CONTROL_HIDE_TITLEBAR_STORAGE_KEY, false),
@@ -263,6 +282,18 @@ export const useDesktopSettingsStore = create<DesktopSettingsState>((set, get) =
         if (window.electron?.saveSettings) {
             void window.electron.saveSettings('MOD_SYSTEM_ENABLED', enable);
         }
+    },
+    handleToggleModResolutionGuard: (enable) => {
+        setStoredBoolean(MOD_RESOLUTION_GUARD_STORAGE_KEY, enable);
+        set({ modResolutionGuardEnabled: enable });
+    },
+    handleSetModResolutionGuardLevel: (level) => {
+        setStoredString(MOD_RESOLUTION_GUARD_LEVEL_STORAGE_KEY, level);
+        set({ modResolutionGuardLevel: level });
+    },
+    handleToggleNativeStage: (enable) => {
+        setStoredBoolean(NATIVE_STAGE_STORAGE_KEY, enable);
+        set({ nativeStageEnabled: enable });
     },
     handleTogglePreventDisplaySleepDuringPlayback: (enable) => {
         setStoredBoolean(PREVENT_DISPLAY_SLEEP_DURING_PLAYBACK_STORAGE_KEY, enable);

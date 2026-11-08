@@ -1,6 +1,6 @@
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { type ConfigEnv, type UserConfig, type ViteDevServer } from 'vite';
+import { type ConfigEnv, type Plugin, type UserConfig, type ViteDevServer } from 'vite';
 import react from '@vitejs/plugin-react';
 import { commandPinyinPlugin } from './dev/pinyin/commandPinyinPlugin.mjs';
 import { traditionalLocalePlugin } from './dev/i18n/traditionalLocalePlugin.mjs';
@@ -11,6 +11,7 @@ import { VitePWA } from 'vite-plugin-pwa';
 import { execSync } from 'child_process';
 import { createHash } from 'crypto';
 import fs from 'fs';
+import postcss from 'postcss';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -64,6 +65,39 @@ function readDevRequestBody(req: import('http').IncomingMessage): Promise<Uint8A
     req.on('end', () => resolve(new Uint8Array(Buffer.concat(chunks))));
     req.on('error', reject);
   });
+}
+
+/**
+ * Chromium 83, still shipped by some API 30 car head units, ignores the whole body of a CSS
+ * `@layer` block. Tailwind emits the visualizer utilities inside those layers, so leaving them in
+ * makes the car player look empty. Car Capacitor builds flatten the layers and keep the original
+ * declaration order; the phone, TV and modern web builds keep cascade layers intact.
+ */
+function capacitorLegacyCascadeLayersPlugin(): Plugin {
+  return {
+    name: 'folia-capacitor-legacy-cascade-layers',
+    apply: 'build',
+    enforce: 'post',
+    generateBundle(_options, bundle) {
+      if (
+        process.env.FOLIA_BUILD_TARGET !== 'capacitor'
+        || process.env.FOLIA_FLATTEN_CASCADE_LAYERS !== '1'
+      ) return;
+      for (const asset of Object.values(bundle)) {
+        if (asset.type !== 'asset' || !asset.fileName.endsWith('.css')) continue;
+        const css = typeof asset.source === 'string'
+          ? asset.source
+          : Buffer.from(asset.source).toString('utf8');
+        if (!css.includes('@layer')) continue;
+        const root = postcss.parse(css);
+        root.walkAtRules('layer', atRule => {
+          if (atRule.nodes) atRule.replaceWith(...atRule.nodes);
+          else atRule.remove();
+        });
+        asset.source = root.toResult({ map: false }).css;
+      }
+    },
+  };
 }
 
 function devLyricProxyPlugin() {
@@ -218,9 +252,17 @@ export default async function viteConfig(_config: ConfigEnv): Promise<UserConfig
       include: ['music-metadata'],
     },
     build: {
+      // Older car head units can still ship the API 30 system WebView (Chromium 83).
+      // Keep Capacitor bundles free of newer syntax, such as logical assignment, that
+      // would make every packaged renderer fail before React can mount.
+      target: process.env.FOLIA_BUILD_TARGET === 'capacitor' ? 'chrome83' : undefined,
+      // Android builds also support older WebViews; desktop and web keep the S621-era baseline.
+      cssTarget: process.env.FOLIA_BUILD_TARGET === 'capacitor' ? 'chrome83' : 'chrome101',
       rollupOptions: {
         input: {
           main: 'index.html',
+          tv: 'tv.html',
+          car: 'car.html',
           stageClient: 'stage-client.html',
           modExport: 'mod-export.html',
         },
@@ -320,7 +362,8 @@ export default async function viteConfig(_config: ConfigEnv): Promise<UserConfig
             }
           ]
         }
-      })
+      }),
+      capacitorLegacyCascadeLayersPlugin(),
     ],
     define: {
       '__COMMIT_HASH__': JSON.stringify(commitHash + commitSuffix),
