@@ -30,7 +30,7 @@ const SENTINELS = [
     // 网易云探索页路由 / 安卓桥登录
     'explore:route',
     'explore:daily:source',
-    'explore:first',
+    'explore:daily-playlists:fallback',
     'daily:read',
     'ne:qr:key:start',
     // 播放失败可见化
