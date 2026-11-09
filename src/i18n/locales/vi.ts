@@ -205,6 +205,141 @@ export default {
       }
     }
   },
+  "tv": {
+    "common": {
+      "close": "Đóng",
+      "trackCount_one": "{{count}} bài hát",
+      "trackCount_other": "{{count}} bài hát"
+    },
+    "car": {
+      "title": "Chế độ ô tô",
+      "subtitle": "Vô lăng, cảm ứng và màn hình lớn",
+      "nowPlaying": "Đang phát",
+      "noSong": "Chưa phát bài nào",
+      "noSongHint": "Bắt đầu phát từ thư viện nhạc trên máy",
+      "scan": "Quét nhạc",
+      "scanning": "Đang quét…",
+      "import": "Nhập nhạc",
+      "importing": "Đang nhập…",
+      "defaultPlayer": "Trình phát mặc định",
+      "openingSettings": "Đang mở cài đặt…",
+      "defaultHint": "Mục nhập tùy xe: chọn Nhạc trong Cài đặt → Ứng dụng mặc định → Nhạc.",
+      "voiceHint": "Trợ lý giọng nói trên xe có thể phát, tạm dừng và chuyển bài; tìm bài hát phụ thuộc vào việc đầu xe có hỗ trợ tìm kiếm nội dung.",
+      "scanDone": "Đã quét {{count}} bài hát",
+      "importDone": "Đã làm mới thư viện · {{count}} bài hát",
+      "empty": "Không tìm thấy bài hát để nhập",
+      "settingsOpened": "Đã mở cài đặt hệ thống. Hãy chọn ứng dụng nhạc mặc định.",
+      "actionFailed": "Thao tác thất bại. Vui lòng thử lại.",
+      "unavailable": "Thao tác này không khả dụng trên thiết bị này",
+      "preparing": "Đang chuẩn bị bài hát…"
+    },
+    "effects": {
+      "open": "Hiệu ứng",
+      "title": "Lời bài hát và nền",
+      "lyrics": "Hiệu ứng lời bài hát",
+      "background": "Hiệu ứng nền"
+    },
+    "failure": {
+      "title": "Không thể tải tài nguyên trình phát",
+      "hint": "Quay về trang chủ rồi mở lại ứng dụng. Nhấn Quay lại để về trang chủ.",
+      "home": "Về trang chủ"
+    },
+    "search": {
+      "open": "Tìm bài hát, nghệ sĩ, album",
+      "title": "Tìm kiếm",
+      "provider": "Đang tìm trên {{provider}}",
+      "placeholder": "Nhập tên bài hát, nghệ sĩ hoặc album",
+      "inputLabel": "Từ khóa tìm kiếm",
+      "action": "Tìm",
+      "loading": "Đang tìm kiếm…",
+      "error": "Tìm kiếm thất bại. Vui lòng thử lại sau.",
+      "retry": "Thử lại",
+      "empty": "Không tìm thấy bài hát cho “{{query}}”",
+      "resultCount_one": "Đã tìm thấy {{count}} bài hát",
+      "resultCount_other": "Đã tìm thấy {{count}} bài hát"
+    },
+    "home": {
+      "signedIn": "Đã đăng nhập",
+      "login": "Đăng nhập",
+      "continue": "Tiếp tục nghe",
+      "chooseSong": "Chọn nội dung để phát",
+      "welcome": "Thư viện của bạn đã sẵn sàng",
+      "loginTitle": "Kết nối dịch vụ nhạc",
+      "loginHint": "Quét mã QR bằng điện thoại",
+      "openPlayer": "Mở trình phát",
+      "recent": "Mới thêm gần đây",
+      "playlists": "Danh sách phát",
+      "radio": "Radio",
+      "albums": "Album",
+      "onlineLibrary": "Thư viện trực tuyến",
+      "liked": "Bài hát đã thích",
+      "loading": "Đang tải…",
+      "localEmpty": "Nhập nhạc trên máy chưa khả dụng trên TV. Hãy đăng nhập để phát danh sách phát trực tuyến.",
+      "loginForPlaylists": "Đăng nhập để xem danh sách phát",
+      "playlistsEmpty": "Tài khoản này chưa có danh sách phát",
+      "loginForRadio": "Đăng nhập để xem FM cá nhân và gợi ý hằng ngày",
+      "radioUnavailable": "Dịch vụ này không cung cấp gợi ý radio",
+      "radioError": "Không thể tải radio",
+      "radioEmpty": "Không có gợi ý radio khả dụng",
+      "radioPlaybackError": "Không thể phát gợi ý này ngay bây giờ. Hãy thử một thẻ khác.",
+      "loginForAlbums": "Đăng nhập để xem album đã lưu",
+      "albumsUnavailable": "Dịch vụ này không hỗ trợ album đã lưu",
+      "albumsError": "Không thể tải album đã lưu",
+      "albumsEmpty": "Chưa có album đã lưu",
+      "loginForLiked": "Đăng nhập để xem bài hát đã thích",
+      "likedEmpty": "Chưa có bài hát đã thích",
+      "likedError": "Không thể tải bài hát đã thích"
+    },
+    "player": {
+      "noSong": "Chưa phát bài nào",
+      "loading": "Đang tải bài hát",
+      "lyricsLoading": "Đang tải lời bài hát…",
+      "noLyrics": "Bài hát này không có lời",
+      "playbackFailed": "Phát thất bại",
+      "previous": "Bài trước",
+      "pause": "Tạm dừng",
+      "play": "Phát",
+      "next": "Bài tiếp theo",
+      "queue": "Hàng đợi",
+      "queueCount_one": "Hàng đợi phát · {{count}} bài hát",
+      "queueCount_other": "Hàng đợi phát · {{count}} bài hát",
+      "queueEmpty": "Hàng đợi trống",
+      "nowPlaying": "Đang phát",
+      "hideControls": "Ẩn điều khiển"
+    },
+    "collection": {
+      "trackCount_one": "{{count}} bài hát",
+      "trackCount_other": "{{count}} bài hát",
+      "loading": "Đang tải bài hát…",
+      "error": "Không thể tải danh sách phát này",
+      "retry": "Thử lại",
+      "empty": "Danh sách phát này không có bài hát có thể phát",
+      "playAll": "Phát tất cả"
+    },
+    "login": {
+      "title": "Đăng nhập vào {{provider}}",
+      "waiting": "Đang chờ mã QR…"
+    },
+    "account": {
+      "title": "Dịch vụ nhạc",
+      "providers": "Dịch vụ",
+      "current": "Hiện tại",
+      "signedIn": "Đã đăng nhập",
+      "notSignedIn": "Đã đăng xuất",
+      "noAccount": "Không cần đăng nhập",
+      "switchAction": "Chuyển",
+      "loginAction": "Quét mã để đăng nhập",
+      "switchTitle": "Chuyển dịch vụ nhạc?",
+      "switchConfirm": "Chuyển dịch vụ",
+      "switchCancel": "Hủy"
+    },
+    "exit": {
+      "title": "Rời ứng dụng Nhạc?",
+      "background": "Tiếp tục phát",
+      "backgroundIdle": "Rời đi trong nền",
+      "exit": "Thoát ứng dụng"
+    }
+  },
   "libraryBravais": {
     "suiteName": "Không gian Bravais",
     "homeTitle": "Thư viện",

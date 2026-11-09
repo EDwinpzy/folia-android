@@ -431,7 +431,9 @@ As for progress buttons, the host keeps such a click inside the layer.
 
 Mod CSS, injected inside `@layer folium-mods` and removed with the mod. The
 stable targets are the host's public parts: `[data-folium-part="progress.track"]` etc.
-(see mods/README.md for the list). Anything else in the host DOM is not API.
+(see the upstream Folium specification at
+https://github.com/chthollyphile/folia-major/blob/main/mods/README.md for the list).
+Anything else in the host DOM is not API.
 
 | 成员 | 类型 | 说明 |
 | --- | --- | --- |

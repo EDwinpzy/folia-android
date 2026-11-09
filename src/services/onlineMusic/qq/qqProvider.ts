@@ -597,7 +597,12 @@ const getLoginStatus = async (): Promise<ProviderUser | null> => {
         const accountId = String(normalized.id || '');
         if (lastQqAccountId && accountId && lastQqAccountId !== accountId) clearQqGuessYouLikeCatalog();
         lastQqAccountId = accountId || null;
-        const user = await withQqVipType(normalized);
+        const hydrated = withCachedQqProfile(normalized);
+        const user = await withQqVipType({
+            ...hydrated,
+            nickname: hydrated.nickname || (hydrated.id ? `QQ ${hydrated.id}` : ''),
+        });
+        cacheQqProfile(user);
         // 登录还在：会话要在到期前续（qqSessionRefresh.ts）；续期的请求排在通道探测之后。
         void refreshDeclaredChannels().then(keepQqSessionFresh);
         // The acceptance test account returned a profile without a display name, so the profile itself is the signal.
