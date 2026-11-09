@@ -41,7 +41,7 @@ export const sanitizeUrlBackgroundItem = (value: unknown): UrlBackgroundItem | n
 
     const item = value as Partial<UrlBackgroundItem>;
     const id = typeof item.id === 'string' ? item.id.trim() : '';
-    const kind = item.kind === 'image' ? 'image' : 'url';
+    const kind = item.kind === 'image' ? 'image' : undefined;
     const url = kind === 'image' ? normalizeUrlBackgroundImage(item.url) : normalizeUrlBackgroundUrl(item.url);
 
     if (!id || !url) {
@@ -52,7 +52,7 @@ export const sanitizeUrlBackgroundItem = (value: unknown): UrlBackgroundItem | n
         ? item.note.trim()
         : kind === 'image' ? '自定义图片' : url;
 
-    return { id, kind, url, note };
+    return { id, ...(kind ? { kind } : {}), url, note };
 };
 
 /** 读取用户选中的图片，压到最长边 1920px 的 JPEG；只保留一张，控制 localStorage 体积。 */
@@ -97,9 +97,10 @@ export const mergeUrlBackgroundList = (
             }
 
             const existing = merged.get(sanitized.id);
+            const kind = sanitized.kind ?? (existing?.kind === 'image' ? 'url' : existing?.kind);
             merged.set(sanitized.id, {
                 ...(existing ?? { id: sanitized.id }),
-                kind: sanitized.kind,
+                ...(kind ? { kind } : {}),
                 url: sanitized.url,
                 note: sanitized.note,
             });
