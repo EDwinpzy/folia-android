@@ -1,5 +1,7 @@
 import type { ModRuntimeInfo } from '../types';
 import { isModsBridgeAvailable, listMods } from '../ipc';
+import { useDesktopSettingsStore } from '../../stores/useDesktopSettingsStore';
+import { isCapacitorAndroid } from '../../platform/runtime';
 import type { FoliumClientApi, FoliumClientModule, FoliumContextKind, FoliumDisposer } from '../folium/contract';
 import { announceFoliumSlowStart, clearFoliumIssues, reportFoliumFault } from './status';
 import { removeFoliumEventHandlers } from '../folium/events';
@@ -254,6 +256,10 @@ export const reconcileFoliumClients = (mods: ModRuntimeInfo[], context: FoliumCo
  */
 export const initFoliumClients = async (): Promise<void> => {
     if (!isModsBridgeAvailable()) return;
+    // Android has no main-process settings store, so its renderer mirror is authoritative. On
+    // desktop, `listMods` is already gated by the main-process value; reading the renderer mirror
+    // here would race its async hydration and skip mods that are enabled.
+    if (isCapacitorAndroid() && !useDesktopSettingsStore.getState().modSystemEnabled) return;
     try {
         const { mods } = await listMods();
         await reconcileFoliumClients(mods, 'main');

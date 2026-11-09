@@ -25,6 +25,8 @@ import type {
 } from './types';
 import { reconcileFoliumClients } from './runtime/clientLoader';
 import { restoreSavedFoliumSelections } from './runtime/missingEntries';
+import { useDesktopSettingsStore } from '../stores/useDesktopSettingsStore';
+import { isCapacitorAndroid } from '../platform/runtime';
 
 // src/mods/useModsStore.ts
 // Renderer-side state for the mod system panel. All mutations flow through the
@@ -72,6 +74,16 @@ export const useModsStore = create<ModsStoreState>((set, get) => ({
     eventsBound: false,
 
     refresh: async () => {
+        if (isCapacitorAndroid() && !useDesktopSettingsStore.getState().modSystemEnabled) {
+            set({
+                mods: [],
+                ffmpeg: { available: false, path: null, version: null, candidates: [] },
+                directories: [],
+                startSkipped: false,
+                selectedModId: null,
+            });
+            return;
+        }
         const payload = await listMods();
         set((state) => {
             const selectedModId = state.selectedModId ?? payload.mods[0]?.id ?? null;
@@ -93,6 +105,10 @@ export const useModsStore = create<ModsStoreState>((set, get) => ({
     },
 
     reloadAll: async () => {
+        if (isCapacitorAndroid() && !useDesktopSettingsStore.getState().modSystemEnabled) {
+            set({ mods: [] });
+            return;
+        }
         const mods = await reloadMods();
         set({ mods });
         await get().refreshFfmpeg();
