@@ -30,6 +30,7 @@ import { clickFocusedTvElement } from './input/focusDom';
 import { isTvDirection, type TvRemoteAction } from './input/tvKeys';
 import {
     createTvTrackSkipGesture,
+    handleTvPlayerHorizontalAction,
     TV_TRACK_SKIP_INTERVAL_MS,
 } from './input/tvTrackSkipGesture';
 import { shouldRevealTvPlayerChrome } from './model/tvPlayerChrome';
@@ -265,44 +266,28 @@ export const TvApp = ({ variant = 'tv' }: { variant?: 'tv' | 'car' } = {}) => {
             return true;
         }
 
-        if (route.page === 'player' && !route.overlay) {
-            if (shouldRevealTvPlayerChrome(action)) {
-                if (action === 'left' || action === 'right') {
-                    if (repeat) {
-                        cancelPendingChromeReveal();
-                        trackSkipGestureRef.current.clear();
-                        return true;
-                    }
-                    if (trackSkipGestureRef.current.press(action, performance.now())) {
-                        cancelPendingChromeReveal();
-                        if (action === 'left') player.skipPrevious();
-                        else player.next();
-                        return true;
-                    }
-                    schedulePlayerChromeReveal();
-                    return true;
-                }
-                trackSkipGestureRef.current.clear();
-                revealPlayerChrome();
-                return true;
-            }
+        if (handleTvPlayerHorizontalAction({
+            route,
+            action,
+            repeat,
+            now: performance.now(),
+            gesture: trackSkipGestureRef.current,
+            cancelPendingChromeReveal,
+            scheduleChromeReveal: schedulePlayerChromeReveal,
+            skipPrevious: player.skipPrevious,
+            next: player.next,
+            moveFocus,
+        })) return true;
+
+        if (route.page === 'player' && !route.overlay && shouldRevealTvPlayerChrome(action)) {
+            trackSkipGestureRef.current.clear();
+            revealPlayerChrome();
+            return true;
         }
 
         cancelPendingChromeReveal();
-        if (
-            route.page === 'player'
-            && route.overlay === 'controls'
-            && !repeat
-            && (action === 'left' || action === 'right')
-        ) {
-            if (trackSkipGestureRef.current.press(action, performance.now())) {
-                if (action === 'left') player.skipPrevious();
-                else player.next();
-                return true;
-            }
-        } else {
-            trackSkipGestureRef.current.clear();
-        }
+        // Any other action abandons an in-flight hidden-player skip gesture.
+        trackSkipGestureRef.current.clear();
 
         if (action === 'ok') return clickFocusedTvElement();
         if (isTvDirection(action)) return moveFocus(action);
