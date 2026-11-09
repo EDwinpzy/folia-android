@@ -121,11 +121,11 @@ QQ 的同一套形状也用于专辑订阅与歌单写入。
 - `npm run build:capacitor` 已通过
 - `npx cap sync android` 已通过
 - `gradlew assembleDebug` 已通过，产出 `android/app/build/outputs/apk/debug/app-debug.apk`
-- APK 包名 `top.izuna.foliamajor`，当前版本 `0.7.20-android.196`（`versionCode` 234），minSdk 24，targetSdk 36
+- APK 包名 `top.izuna.foliamajor`，当前版本 `0.7.27-android.450`（`versionCode` 488），minSdk 24，targetSdk 36
 
 ## 尚未完成
 
-- 正式签名和应用商店配置
+- 正式签名已接入；应用商店配置尚未完成
 
 网易云 / QQ / 酷狗登录与曲库、AI 主题配置、后台播放前台服务、锁屏与通知栏媒体控制、
 本地音乐（系统文件管理导入 + 设备音乐库扫描）均已接入，详细改动见提交历史。
@@ -1046,3 +1046,14 @@ AI 合并上游模型发现/预设接口并保留安卓直连运行时；`packag
 ### 0.7.26-android.428：Apple Music WebView 恢复媒体计时器
 
 - onResume/resumeTimers/setKeepScreenOn，避免隐藏 WebView 音频被挂起。
+
+### 0.7.27-android.450：TV/车机整合与正式签名
+
+- TV/投影仪入口继续保留遥控器焦点、语音点歌、歌单与播放控制适配；播放控制层显示时，左右键只移动焦点，连续按左右键不再切换上下曲。
+- 桌面入口按设备是否声明 Leanback/电视界面路由到 TV 页面，避免投影仪通过普通 Launcher 启动时打开手机主界面。
+- 新增 Android 车机横屏入口，支持 MediaBrowserService、MediaSession、方向盘/面板媒体键、语音搜索、本地曲库和默认音乐应用发现。
+- 合并上游 `0.7.27` 的播放、平台与性能改动，并保留 Android 原生桥、后台播放通知和 TV/车机适配。
+- 恢复 Apple Music Android companion 的 storefront 对齐、队列自启、重试与播放诊断，改善部分账号和地区的起播失败。
+- 修复 QQ 登录资料偶发缺失，重新登录或读取账号状态时优先恢复缓存的昵称与头像。
+- 补齐 TV 界面的越南语文案，并同步 Android 存储键、外观去向和平台桥登记。
+- 改用独立 release keystore 签名；签名文件和密码只保留在本地及私有备份，不进入仓库。由于签名与此前的调试包不同，旧调试包需要卸载后安装本正式版。

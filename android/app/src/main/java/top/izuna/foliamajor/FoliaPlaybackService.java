@@ -398,7 +398,7 @@ public class FoliaPlaybackService extends MediaBrowserService {
         if ("car".equals(target)) return CarActivity.class;
         if ("tv".equals(target)) return TvActivity.class;
         if (EntryActivity.isAutomotiveSurface(this)) return CarActivity.class;
-        if (getPackageManager().hasSystemFeature(PackageManager.FEATURE_LEANBACK)) {
+        if (EntryActivity.isTelevisionSurface(this)) {
             return TvActivity.class;
         }
         return MainActivity.class;
