@@ -11,7 +11,7 @@ import android.os.Bundle;
 import java.util.Locale;
 
 /**
- * Single launcher entry that selects the phone or automotive renderer before Capacitor starts.
+ * Single launcher entry that selects the phone, TV or automotive renderer before Capacitor starts.
  * Keeping one exported launcher activity avoids duplicate icons while still exposing APP_MUSIC.
  */
 public class EntryActivity extends Activity {
@@ -19,7 +19,9 @@ public class EntryActivity extends Activity {
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         Intent source = getIntent();
-        Class<?> target = isAutomotiveSurface(this) ? CarActivity.class : MainActivity.class;
+        Class<?> target = isAutomotiveSurface(this)
+            ? CarActivity.class
+            : isTelevisionSurface(this) ? TvActivity.class : MainActivity.class;
         Intent launch = new Intent(this, target);
         if (source != null) {
             launch.putExtras(source);
@@ -28,6 +30,15 @@ public class EntryActivity extends Activity {
         }
         startActivity(launch);
         finish();
+    }
+
+    static boolean isTelevisionSurface(Context context) {
+        if (context.getPackageManager().hasSystemFeature(PackageManager.FEATURE_LEANBACK)) {
+            return true;
+        }
+        UiModeManager uiModeManager = context.getSystemService(UiModeManager.class);
+        return uiModeManager != null
+            && uiModeManager.getCurrentModeType() == android.content.res.Configuration.UI_MODE_TYPE_TELEVISION;
     }
 
     static boolean isAutomotiveSurface(Context context) {

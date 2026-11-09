@@ -13,7 +13,7 @@
 | 共用播放界面 | `src/tv/TvApp.tsx`、`src/tv/` |
 | 原生媒体服务 | `android/app/src/main/java/top/izuna/foliamajor/FoliaPlaybackService.java` |
 
-同一 APK 只声明一个桌面入口 `EntryActivity`，它同时带有 `APP_MUSIC` 分类。设备声明 Android Automotive 特性、当前处于车机 UI 模式，或 Build 标识属于 BYD/Fangchengbao/方程豹时，入口转到 `CarActivity`；其他设备继续进入手机界面，因此手机和车机桌面都不会出现重复图标。DiLink 这类定制车机不一定声明 AAOS 特性，也可能把 `uiMode` 报成普通平板，因此需要车型标识兜底。
+同一 APK 只声明一个桌面入口 `EntryActivity`，它同时带有 `APP_MUSIC` 分类。设备声明 Android Automotive 特性、当前处于车机 UI 模式，或 Build 标识属于 BYD/Fangchengbao/方程豹时，入口转到 `CarActivity`；声明 Leanback 或处于电视 UI 模式的投影仪/电视转到 `TvActivity`；其他设备进入手机界面，因此手机、电视和车机桌面都不会出现重复图标。DiLink 这类定制车机不一定声明 AAOS 特性，也可能把 `uiMode` 报成普通平板，因此需要车型标识兜底。
 
 `CarActivity` 继承 `TvActivity` 的横屏、沉浸式、WebView 焦点和恢复逻辑，只替换启动页并让硬件音量键控制媒体音量。`TvApp` 通过 `variant="car"` 启用车机控制台、降低装饰动画并切换到车机默认焦点。
 
