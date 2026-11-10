@@ -117,7 +117,9 @@ public class MainActivity extends BridgeActivity {
         // intent before clearing its extras so that cold starts queue one request, not a resume.
         intent.putExtra(VOICE_REQUEST_HANDLED, true);
         VoicePlayIntents.clear(intent);
-        if (request.query == null) {
+        if (request.entry != null) {
+            FoliaNativePlugin.offerVoiceEntryRequest(request.entry, request.query);
+        } else if (request.query == null) {
             FoliaNativePlugin.offerVoiceResumeRequest();
         } else {
             FoliaNativePlugin.offerVoicePlayRequest(request.query);

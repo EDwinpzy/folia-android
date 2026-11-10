@@ -10,7 +10,11 @@ type NativeVoicePlayPlugin = {
         eventName: string,
         listener: () => void,
     ) => Promise<{ remove: () => Promise<void> }> | { remove: () => Promise<void> };
-    consumeVoicePlayRequest: () => Promise<{ query?: string; action?: string } | undefined>;
+    consumeVoicePlayRequest: () => Promise<{
+        query?: string;
+        entry?: string;
+        action?: string;
+    } | undefined>;
 };
 
 const getPlugin = (): NativeVoicePlayPlugin | null => {
@@ -32,20 +36,27 @@ const getPlugin = (): NativeVoicePlayPlugin | null => {
 /**
  * Consumes a voice song request from the Android bridge, searches the active Omni provider and
  * hands the playable results to the TV queue. Native events only wake the consumer; the query is
- * read once through consumeVoicePlayRequest so cold starts and activity recreations cannot replay it.
+ * read once through consumeVoicePlayRequest so cold starts and activity recreations cannot replay
+ * it. Semantic entries are retried briefly because account, library and radio data can still be
+ * loading when a cold voice launch reaches the WebView.
  */
 export const useTvVoicePlay = ({
     onPlayTracks,
     onResume,
+    onPlayEntry,
 }: {
     onPlayTracks: (songs: SongResult[], startIndex: number) => void;
     onResume: () => void;
+    onPlayEntry: (entry: string, query: string | null) => Promise<boolean> | boolean;
 }): void => {
     const onPlayTracksRef = useRef(onPlayTracks);
     onPlayTracksRef.current = onPlayTracks;
     const onResumeRef = useRef(onResume);
     onResumeRef.current = onResume;
+    const onPlayEntryRef = useRef(onPlayEntry);
+    onPlayEntryRef.current = onPlayEntry;
     const requestRef = useRef(0);
+    const entryAttemptRef = useRef(0);
 
     const playQuery = useCallback(async (rawQuery: string) => {
         const query = rawQuery.trim();
@@ -78,10 +89,30 @@ export const useTvVoicePlay = ({
         let disposed = false;
         let listenerHandle: { remove: () => Promise<void> } | { remove: () => void } | null = null;
 
+        const playEntry = async (entry: string, query: string | null) => {
+            const attempt = ++entryAttemptRef.current;
+            const deadline = Date.now() + 20_000;
+            while (!disposed && entryAttemptRef.current === attempt) {
+                const played = await onPlayEntryRef.current(entry, query);
+                if (disposed || entryAttemptRef.current !== attempt) return;
+                if (played) return;
+                if (Date.now() >= deadline) {
+                    console.warn(`[TV Voice] Entry could not be played: ${entry}`);
+                    return;
+                }
+                await new Promise(resolve => setTimeout(resolve, 500));
+            }
+        };
+
         const consume = async () => {
             try {
                 const request = await plugin.consumeVoicePlayRequest();
                 if (disposed || !request) return;
+                if (request.entry) {
+                    await playEntry(request.entry, request.query ?? null);
+                    return;
+                }
+                entryAttemptRef.current += 1;
                 if (request.action === 'resume') {
                     onResumeRef.current();
                     return;
@@ -110,6 +141,7 @@ export const useTvVoicePlay = ({
         return () => {
             disposed = true;
             requestRef.current += 1;
+            entryAttemptRef.current += 1;
             if (listenerHandle) void listenerHandle.remove();
         };
     }, [playQuery]);

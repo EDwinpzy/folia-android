@@ -14,7 +14,7 @@ import { TvSongCard } from '../components/TvSongCard';
 import type { TvAccountModel } from '../hooks/useTvAccount';
 import { useTvHomeFocusPrewarm } from '../hooks/useTvHomeFocusPrewarm';
 import type { TvLibraryModel } from '../hooks/useTvLibrary';
-import { useTvOnlineHome } from '../hooks/useTvOnlineHome';
+import type { TvOnlineHomeModel } from '../hooks/useTvOnlineHome';
 import {
     CAR_HOME_ROW_SIZE,
     selectTvCarQueueWindow,
@@ -48,6 +48,7 @@ const CarQueueSongCard = memo(({
 export const TvHome = ({
     account,
     library,
+    online,
     player,
     onActivateHero,
     onOpenAccount,
@@ -60,6 +61,7 @@ export const TvHome = ({
 }: {
     account: TvAccountModel;
     library: TvLibraryModel;
+    online: TvOnlineHomeModel;
     player: TvPlayerModel;
     onActivateHero: () => void;
     onOpenAccount: () => void;
@@ -71,7 +73,6 @@ export const TvHome = ({
     inert: boolean;
 }) => {
     const { t } = useTranslation();
-    const online = useTvOnlineHome(account, !isCar);
     const isPlaying = player.status === 'playing';
     const focusPrewarmKey = !account.isAuthenticated
         ? 'login'
