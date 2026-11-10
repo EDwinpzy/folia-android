@@ -18,7 +18,19 @@ public class EntryActivity extends Activity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        Intent source = getIntent();
+        launchTarget(getIntent());
+        finish();
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        launchTarget(intent);
+        finish();
+    }
+
+    private void launchTarget(Intent source) {
         Class<?> target = isAutomotiveSurface(this)
             ? CarActivity.class
             : isTelevisionSurface(this) ? TvActivity.class : MainActivity.class;
@@ -29,7 +41,6 @@ public class EntryActivity extends Activity {
             launch.setAction(source.getAction());
         }
         startActivity(launch);
-        finish();
     }
 
     static boolean isTelevisionSurface(Context context) {
