@@ -8,6 +8,7 @@ import {
 } from '../../library/core/home/homeCards';
 import type { SongResult } from '../../types';
 import type { ProviderCollection } from '../../types/onlineMusic';
+import type { PersonalFmLaunch } from '../../types/personalFm';
 import type { TvAccountModel } from '../hooks/useTvAccount';
 import type { TvOnlineHomeModel } from '../hooks/useTvOnlineHome';
 import { TvMediaRow, TvRowStatus } from './TvMediaRow';
@@ -46,7 +47,9 @@ export const TvHomeLibraryRows = ({
     }, [onOpenCollection]);
     const activateRadioCard = useCallback(async (card: LibraryHomeCard) => {
         if (isPersonalFmCard(card)) {
-            const songs = await online.playPersonalFm();
+            const selection =
+                (card.raw as { personalFm?: PersonalFmLaunch } | undefined)?.personalFm;
+            const songs = await online.playPersonalFm(selection);
             if (songs) onPlayTracks(songs, 0);
             return;
         }

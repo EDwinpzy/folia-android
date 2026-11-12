@@ -85,6 +85,8 @@ public class FoliaNativePlugin extends Plugin {
     private static final long VOICE_PLAY_REQUEST_TTL_MS = 120_000L;
     private static String pendingVoicePlayQuery;
     private static boolean pendingVoiceResumeRequest;
+    private static String pendingVoiceEntry;
+    private static String pendingVoiceEntryQuery;
     private static long pendingVoicePlayAt;
     private static int pendingQueuePlayIndex = -1;
     private static long pendingQueuePlayAt;
@@ -138,6 +140,8 @@ public class FoliaNativePlugin extends Plugin {
         synchronized (VOICE_PLAY_LOCK) {
             pendingVoicePlayQuery = normalized;
             pendingVoiceResumeRequest = false;
+            pendingVoiceEntry = null;
+            pendingVoiceEntryQuery = null;
             pendingVoicePlayAt = SystemClock.elapsedRealtime();
         }
         notifyVoicePlayListener();
@@ -148,6 +152,22 @@ public class FoliaNativePlugin extends Plugin {
         synchronized (VOICE_PLAY_LOCK) {
             pendingVoicePlayQuery = null;
             pendingVoiceResumeRequest = true;
+            pendingVoiceEntry = null;
+            pendingVoiceEntryQuery = null;
+            pendingVoicePlayAt = SystemClock.elapsedRealtime();
+        }
+        notifyVoicePlayListener();
+    }
+
+    /** Queues a semantic TV music entry such as liked songs, personal FM or a named playlist. */
+    static void offerVoiceEntryRequest(String entry, String query) {
+        String normalizedEntry = VoicePlayIntents.normalizeEntry(entry);
+        if (normalizedEntry == null) return;
+        synchronized (VOICE_PLAY_LOCK) {
+            pendingVoicePlayQuery = null;
+            pendingVoiceResumeRequest = false;
+            pendingVoiceEntry = normalizedEntry;
+            pendingVoiceEntryQuery = VoicePlayIntents.normalize(query);
             pendingVoicePlayAt = SystemClock.elapsedRealtime();
         }
         notifyVoicePlayListener();
@@ -190,19 +210,28 @@ public class FoliaNativePlugin extends Plugin {
     public void consumeVoicePlayRequest(PluginCall call) {
         String query = null;
         boolean resume = false;
+        String entry = null;
+        String entryQuery = null;
         synchronized (VOICE_PLAY_LOCK) {
             boolean fresh = pendingVoicePlayAt > 0L
                 && SystemClock.elapsedRealtime() - pendingVoicePlayAt <= VOICE_PLAY_REQUEST_TTL_MS;
             if (fresh) {
                 query = pendingVoicePlayQuery;
                 resume = pendingVoiceResumeRequest;
+                entry = pendingVoiceEntry;
+                entryQuery = pendingVoiceEntryQuery;
             }
             pendingVoicePlayQuery = null;
             pendingVoiceResumeRequest = false;
+            pendingVoiceEntry = null;
+            pendingVoiceEntryQuery = null;
             pendingVoicePlayAt = 0L;
         }
         JSObject result = new JSObject();
-        if (query != null) result.put("query", query);
+        if (entry != null) {
+            result.put("entry", entry);
+            if (entryQuery != null) result.put("query", entryQuery);
+        } else if (query != null) result.put("query", query);
         else if (resume) result.put("action", "resume");
         call.resolve(result);
     }

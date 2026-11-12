@@ -2,13 +2,19 @@
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { applyKeepScreenOn, readStoredKeepScreenOn } from '../services/androidKeepScreenOn';
+import { omni } from '../services/onlineMusic/omni';
 import { useNativeBackButton } from '../hooks/useNativeBackButton';
 import { canRetryLogin } from '../library/core/account/accountRules';
 import { useCarInitialFocus } from '../car/useCarInitialFocus';
 import { useCarInputModality } from '../car/useCarInputModality';
 import { TvCarToolbar } from '../car/TvCarToolbar';
+import {
+    DAILY_RECOMMENDATIONS_CARD_ID,
+    PERSONAL_FM_CARD_ID,
+} from '../library/core/home/homeCards';
 import type { SongResult } from '../types';
 import type { ProviderCollection } from '../types/onlineMusic';
+import type { PersonalFmLaunch } from '../types/personalFm';
 import { TvChunkFailureOverlay } from './components/TvChunkFailureOverlay';
 import { TvChunkLoadBoundary } from './components/TvChunkLoadBoundary';
 import { TvCarRecentPlaysRecorder } from './components/TvCarRecentPlaysRecorder';
@@ -22,6 +28,7 @@ import { useTvControlsAutoHide } from './hooks/useTvControlsAutoHide';
 import { useTvFocus } from './hooks/useTvFocus';
 import { useTvLibrary } from './hooks/useTvLibrary';
 import { useTvNativePlayback } from './hooks/useTvNativePlayback';
+import { useTvOnlineHome } from './hooks/useTvOnlineHome';
 import { useTvPerformanceProfile } from './hooks/useTvPerformanceProfile';
 import { useTvPlayer } from './hooks/useTvPlayer';
 import { useTvRemote } from './hooks/useTvRemote';
@@ -34,6 +41,8 @@ import {
     TV_TRACK_SKIP_INTERVAL_MS,
 } from './input/tvTrackSkipGesture';
 import { shouldRevealTvPlayerChrome } from './model/tvPlayerChrome';
+import { selectTvVoiceNamedItem } from './model/tvVoiceEntry';
+import { selectTvVoicePlayQueue } from './model/tvVoicePlay';
 import {
     resolveTvBackRoute,
     resolveTvEffectsRoute,
@@ -82,6 +91,7 @@ export const TvApp = ({ variant = 'tv' }: { variant?: 'tv' | 'car' } = {}) => {
     useCarInputModality(isCar);
     const account = useTvAccount({ onProviderSwitch: player.pause });
     const library = useTvLibrary(account);
+    const online = useTvOnlineHome(account, !isCar);
     const trackSkipGestureRef = useRef(createTvTrackSkipGesture());
     const pendingChromeRevealTimerRef = useRef<number | null>(null);
     const [route, setRoute] = useState<TvRoute>(TV_HOME_ROUTE);
@@ -408,7 +418,104 @@ export const TvApp = ({ variant = 'tv' }: { variant?: 'tv' | 'car' } = {}) => {
         openPlayer();
     }, [openPlayer, player]);
 
-    useTvVoicePlay({ onPlayTracks: playTracks, onResume: activateHero });
+    const playCollection = useCallback(async (
+        collection: ProviderCollection | null | undefined,
+    ): Promise<boolean> => {
+        if (!collection) return false;
+        try {
+            const limit = Math.min(200, Math.max(1, collection.trackCount ?? 100));
+            const page = await omni.getCollectionTracks(collection, { limit, offset: 0 });
+            const playable = selectTvVoicePlayQueue(page.items, '');
+            if (!playable) return false;
+            playTracks(playable.songs, playable.startIndex);
+            return true;
+        } catch (error) {
+            console.warn('[TV Voice] Collection playback failed', error);
+            return false;
+        }
+    }, [playTracks]);
+
+    const playVoiceEntry = useCallback(async (
+        entry: string,
+        query: string | null,
+    ): Promise<boolean> => {
+        switch (entry) {
+            case 'music.resume':
+                activateHero();
+                return true;
+            case 'music.liked':
+                if (library.likedSongs.length === 0) return false;
+                playTracks(library.likedSongs, 0);
+                return true;
+            case 'music.local':
+                if (library.localSongs.length === 0) return false;
+                playTracks(library.localSongs, 0);
+                return true;
+            case 'music.recent':
+                if (library.recentLocalSongs.length === 0) return false;
+                playTracks(library.recentLocalSongs, 0);
+                return true;
+            case 'music.personal_fm': {
+                const songs = await online.playPersonalFm();
+                if (!songs) return false;
+                playTracks(songs, 0);
+                return true;
+            }
+            case 'music.daily_recommendations': {
+                const songs = await online.playDailyRecommendations();
+                if (!songs) return false;
+                playTracks(songs, 0);
+                return true;
+            }
+            case 'music.cloud':
+                return playCollection(library.playlists.find(item => item.type === 'cloud'));
+            case 'music.playlist':
+                return playCollection(selectTvVoiceNamedItem(library.playlists, query));
+            case 'music.album': {
+                const card = selectTvVoiceNamedItem(online.albumCards, query);
+                return playCollection(card?.raw as ProviderCollection | undefined);
+            }
+            case 'music.radio': {
+                const card = selectTvVoiceNamedItem(
+                    online.radioCards.filter(item => (
+                        item.id !== PERSONAL_FM_CARD_ID
+                        && item.id !== DAILY_RECOMMENDATIONS_CARD_ID
+                    )),
+                    query,
+                );
+                if (!card) return false;
+                const selection =
+                    (card.raw as { personalFm?: PersonalFmLaunch } | undefined)?.personalFm;
+                if (selection) {
+                    const songs = await online.playPersonalFm(selection);
+                    if (!songs) return false;
+                    playTracks(songs, 0);
+                    return true;
+                }
+                return playCollection(card?.raw as ProviderCollection | undefined);
+            }
+            default:
+                return false;
+        }
+    }, [
+        activateHero,
+        library.likedSongs,
+        library.localSongs,
+        library.playlists,
+        library.recentLocalSongs,
+        online.albumCards,
+        online.playDailyRecommendations,
+        online.playPersonalFm,
+        online.radioCards,
+        playCollection,
+        playTracks,
+    ]);
+
+    useTvVoicePlay({
+        onPlayTracks: playTracks,
+        onResume: activateHero,
+        onPlayEntry: playVoiceEntry,
+    });
 
     const openCollection = useCallback((nextCollection: ProviderCollection) => {
         setCollection(nextCollection);
@@ -444,6 +551,7 @@ export const TvApp = ({ variant = 'tv' }: { variant?: 'tv' | 'car' } = {}) => {
                     <TvHome
                         account={account}
                         library={library}
+                        online={online}
                         player={player}
                         onActivateHero={activateHero}
                         onOpenAccount={openAccount}

@@ -18,6 +18,7 @@ import { readOnlineProviderCapabilities } from '../../library/core/home/online/o
 import { omni } from '../../services/onlineMusic/omni';
 import type { SongResult } from '../../types';
 import type { MediaId } from '../../types/onlineMusic';
+import type { PersonalFmLaunch } from '../../types/personalFm';
 import {
     createTvOnlineHomeResources,
     isAbortError,
@@ -40,7 +41,7 @@ export type TvOnlineHomeModel = {
     albumsStatus: LibraryHomeFeedStatus;
     radioStatus: LibraryHomeFeedStatus;
     radioActionError: TvRadioActionError | null;
-    playPersonalFm: () => Promise<SongResult[] | null>;
+    playPersonalFm: (selection?: PersonalFmLaunch) => Promise<SongResult[] | null>;
     playDailyRecommendations: () => Promise<SongResult[] | null>;
 };
 
@@ -115,17 +116,21 @@ export const useTvOnlineHome = (
     const runRadioPlayback = useCallback(async (
         reason: TvRadioActionError,
         selectCachedSongs: (data: TvRadioFeedData) => SongResult[],
-        loadFallbackSongs: () => Promise<SongResult[]>,
+        loadFallbackSongs: (selection?: PersonalFmLaunch) => Promise<SongResult[]>,
+        selection?: PersonalFmLaunch,
     ): Promise<SongResult[] | null> => {
         const snapshot = radioFeed.getSnapshot();
-        if (!snapshot.data || !isCurrentOwner(snapshot.owner)) return null;
+        const snapshotOwner = isCurrentOwner(snapshot.owner) ? snapshot.owner : null;
+        const ownerAtStart = snapshotOwner ?? owner;
+        if (!ownerAtStart) return null;
 
         const requestId = ++playbackRequestRef.current;
-        const ownerAtStart = snapshot.owner;
         setRadioActionError(null);
-        let songs = selectCachedSongs(snapshot.data);
+        let songs = selection || !snapshotOwner || !snapshot.data
+            ? []
+            : selectCachedSongs(snapshot.data);
         try {
-            if (songs.length === 0) songs = await loadFallbackSongs();
+            if (songs.length === 0) songs = await loadFallbackSongs(selection);
         } catch (error) {
             const latest = radioFeed.getSnapshot();
             if (
@@ -151,13 +156,14 @@ export const useTvOnlineHome = (
             return null;
         }
         return songs;
-    }, [isCurrentOwner, radioFeed]);
+    }, [isCurrentOwner, owner, radioFeed]);
 
     const playPersonalFm = useCallback(
-        () => runRadioPlayback(
+        (selection?: PersonalFmLaunch) => runRadioPlayback(
             'personal-fm',
             data => data.personalFm,
-            () => omni.getPersonalFm(),
+            requested => omni.getPersonalFm(requested),
+            selection,
         ),
         [runRadioPlayback],
     );

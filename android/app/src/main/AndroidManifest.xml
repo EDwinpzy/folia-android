@@ -96,6 +96,7 @@
             </intent-filter>
             <intent-filter>
                 <action android:name="top.izuna.foliamajor.action.VOICE_PLAY" />
+                <action android:name="top.izuna.foliamajor.action.VOICE_COMMAND_V1" />
                 <action android:name="android.media.action.MEDIA_PLAY_FROM_SEARCH" />
                 <action android:name="android.intent.action.MEDIA_SEARCH" />
                 <category android:name="android.intent.category.DEFAULT" />
