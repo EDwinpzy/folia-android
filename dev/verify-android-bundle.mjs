@@ -35,6 +35,8 @@ const SENTINELS = [
     'ne:qr:key:start',
     // 播放失败可见化
     'media-error-',
+    // TV/车机播放页收藏按钮
+    'controls-like',
     // 0.7.22 汽水音乐安卓桥：协议移植、可用性、原生 HTTP/媒体白名单
     'qishuiSessionV1',
     'Qishui Android bridge request failed',

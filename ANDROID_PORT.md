@@ -121,7 +121,7 @@ QQ 的同一套形状也用于专辑订阅与歌单写入。
 - `npm run build:capacitor` 已通过
 - `npx cap sync android` 已通过
 - `gradlew assembleDebug` 已通过，产出 `android/app/build/outputs/apk/debug/app-debug.apk`
-- APK 包名 `top.izuna.foliamajor`，当前版本 `0.7.27-android.450`（`versionCode` 488），minSdk 24，targetSdk 36
+- APK 包名 `top.izuna.foliamajor`，当前版本 `0.7.27-android.451`（`versionCode` 489），minSdk 24，targetSdk 36
 
 ## 尚未完成
 
@@ -1057,3 +1057,10 @@ AI 合并上游模型发现/预设接口并保留安卓直连运行时；`packag
 - 修复 QQ 登录资料偶发缺失，重新登录或读取账号状态时优先恢复缓存的昵称与头像。
 - 补齐 TV 界面的越南语文案，并同步 Android 存储键、外观去向和平台桥登记。
 - 改用独立 release keystore 签名；签名文件和密码只保留在本地及私有备份，不进入仓库。由于签名与此前的调试包不同，旧调试包需要卸载后安装本正式版。
+
+### 0.7.27-android.451：播放页收藏按钮
+
+- TV 与车机播放页底部控制栏新增收藏按钮，遥控器可直接聚焦；收藏后显示红色心形状态。
+- 本地歌曲写入本地「Liked Songs」收藏歌单，在线歌曲经 Omni 调用当前平台的点赞接口，并在切歌前显示成功或失败提示。
+- 收藏成功后首页「喜欢」列表立即增量更新；读取列表期间发生的收藏会在加载完成后合并，不再丢失。
+- 本地歌单写入改为串行队列，删除歌曲时从所有歌单原子移除，避免并发写回旧快照覆盖刚完成的收藏。
