@@ -2,6 +2,7 @@
 
 import { motion, useMotionValueEvent, useTransform } from 'framer-motion';
 import {
+    Heart,
     ListMusic,
     Pause,
     Play,
@@ -12,18 +13,21 @@ import {
 import { useTranslation } from 'react-i18next';
 import { useCallback, useEffect, useRef } from 'react';
 import { getSongArtistLabel } from '../../services/onlineMusic/songMetadata';
+import type { TvSongLikeModel } from '../hooks/useTvSongLike';
 import { formatTvTime } from '../model/tvLyricFill';
 import type { TvPlayerModel } from '../model/tvTypes';
 import { resolveTvSongCoverUrl, TV_COVER_SIZE } from '../services/tvPlaybackSource';
 
 export const TvControlDock = ({
     player,
+    like,
     constrained,
     onOpenQueue,
     onOpenEffects,
     onPrevious = player.previous,
 }: {
     player: TvPlayerModel;
+    like: TvSongLikeModel;
     constrained: boolean;
     onOpenQueue: () => void;
     onOpenEffects?: () => void;
@@ -115,6 +119,26 @@ export const TvControlDock = ({
                         </button>
                     </span>
                     <span className="tv-control-utilities">
+                        <button
+                            type="button"
+                            className={`is-utility${like.isLiked ? ' is-liked' : ''}`}
+                            data-tv-focusable="true"
+                            data-tv-focus-key="controls-like"
+                            onClick={like.toggle}
+                            aria-label={
+                                like.disabledReason
+                                || (like.isLiked ? t('player.unlike') : t('player.like'))
+                            }
+                            aria-pressed={like.isLiked}
+                            aria-busy={like.pending || undefined}
+                            title={like.disabledReason}
+                            disabled={like.disabled}
+                        >
+                            <Heart
+                                size={21}
+                                fill={like.isLiked ? 'currentColor' : 'none'}
+                            />
+                        </button>
                         <button
                             type="button"
                             className="is-utility"

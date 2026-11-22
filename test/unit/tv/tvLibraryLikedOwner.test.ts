@@ -3,9 +3,12 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { SongResult } from '../../../src/types';
 
 const deferred = vi.hoisted(() => ({
     resolveAccountB: null as (() => void) | null,
+    firstLikedReadStarted: null as (() => void) | null,
+    resolveFirstLikedRead: null as (() => void) | null,
 }));
 
 vi.mock('../../../src/services/db', () => ({
@@ -22,6 +25,12 @@ vi.mock('../../../src/services/onlineMusic/omni', () => ({
             if (userId === 'account-b') {
                 await new Promise<void>(resolve => {
                     deferred.resolveAccountB = resolve;
+                });
+            }
+            if (userId === 'account-hold') {
+                await new Promise<void>(resolve => {
+                    deferred.resolveFirstLikedRead = resolve;
+                    deferred.firstLikedReadStarted?.();
                 });
             }
             return { ids: [`${userId}-song`] };
@@ -76,6 +85,8 @@ const renderAccount = async (userId: string | null) => {
 
 beforeEach(() => {
     deferred.resolveAccountB = null;
+    deferred.firstLikedReadStarted = null;
+    deferred.resolveFirstLikedRead = null;
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -99,5 +110,34 @@ describe('useTvLibrary liked-song ownership', () => {
         await act(async () => deferred.resolveAccountB?.());
         expect(library?.likedSongs.map(song => song.id)).toEqual(['account-b-song']);
         expect(library?.isLoadingLiked).toBe(false);
+    });
+
+    it('keeps a like made while the liked list is loading', async () => {
+        const firstReadStarted = new Promise<void>(resolve => {
+            deferred.firstLikedReadStarted = resolve;
+        });
+        await act(async () => {
+            root.render(createElement(Probe, { account: accountFor('account-hold') }));
+        });
+        await firstReadStarted;
+
+        const likedSong: SongResult = {
+            id: 'liked-now',
+            name: 'Liked now',
+            artists: [],
+            album: { id: '', name: '' },
+            durationMs: 1,
+            sourceRef: { kind: 'online', providerId: 'netease', mediaId: 'liked-now' },
+        };
+        act(() => {
+            library?.applyLikedSongChange(likedSong, true);
+        });
+        expect(library?.likedSongs).toEqual([]);
+
+        await act(async () => deferred.resolveFirstLikedRead?.());
+        expect(library?.likedSongs.map(song => song.id)).toEqual([
+            'liked-now',
+            'account-hold-song',
+        ]);
     });
 });

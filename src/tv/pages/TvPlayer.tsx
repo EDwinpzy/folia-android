@@ -12,6 +12,8 @@ import { TvControlDock } from '../components/TvControlDock';
 import { TvLyricStage } from '../components/TvLyricStage';
 import { TvVisualizerStage } from '../components/TvVisualizerStage';
 import { useTvAudioAnalyser } from '../hooks/useTvAudioAnalyser';
+import { useTvSongLike } from '../hooks/useTvSongLike';
+import type { SongResult } from '../../types';
 import type { TvPlayerModel } from '../model/tvTypes';
 import { resolveTvVisualTheme } from '../model/tvVisualTheme';
 import { resolveTvTouchGesture } from '../model/tvTouchGesture';
@@ -25,6 +27,7 @@ export const TvPlayer = ({
     onOpenQueue,
     onOpenEffects,
     onRevealControls,
+    onSongLikeChanged,
     inert,
 }: {
     player: TvPlayerModel;
@@ -34,6 +37,7 @@ export const TvPlayer = ({
     onOpenQueue: () => void;
     onOpenEffects?: () => void;
     onRevealControls: () => void;
+    onSongLikeChanged?: (song: SongResult, liked: boolean) => void;
     inert: boolean;
 }) => {
     const { t } = useTranslation();
@@ -44,6 +48,7 @@ export const TvPlayer = ({
         startedOnControl: boolean;
     } | null>(null);
     const song = player.currentSong;
+    const like = useTvSongLike(song, onSongLikeChanged);
     const coverUrl = resolveTvSongCoverUrl(song, TV_COVER_SIZE.backdrop);
     const artist = song ? getSongArtistLabel(song) : '';
     const album = song ? getSongAlbumLabel(song) : '';
@@ -134,11 +139,18 @@ export const TvPlayer = ({
                         <strong>{song?.name || t('tv.player.noSong')}</strong>
                         <small>{[artist, album].filter(Boolean).join(' · ') || t('tv.home.chooseSong')}</small>
                     </div>
-                    {statusLabel && (
+                    {(statusLabel || like.notice) && (
                         <div className="tv-player-mode tv-player-status" aria-live="polite">
-                            <em className={player.status === 'error' ? 'is-error' : undefined}>
-                                {statusLabel}
-                            </em>
+                            {statusLabel && (
+                                <em className={player.status === 'error' ? 'is-error' : undefined}>
+                                    {statusLabel}
+                                </em>
+                            )}
+                            {like.notice && (
+                                <em className={like.notice.tone === 'error' ? 'is-error' : undefined}>
+                                    {like.notice.text}
+                                </em>
+                            )}
                         </div>
                     )}
                 </header>
@@ -169,6 +181,7 @@ export const TvPlayer = ({
             {controlsOpen && (
                 <TvControlDock
                     player={player}
+                    like={like}
                     constrained={constrained}
                     onOpenQueue={onOpenQueue}
                     onOpenEffects={onOpenEffects}

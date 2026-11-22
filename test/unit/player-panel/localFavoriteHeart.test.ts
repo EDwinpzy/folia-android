@@ -26,6 +26,7 @@ const env = vi.hoisted(() => {
 vi.mock('@/services/db', () => ({
     getFromCache: async (key: string) => env.cache.get(key) ?? null,
     saveToCache: async (key: string, data: unknown) => { env.cache.set(key, data); },
+    saveToCacheOrThrow: async (key: string, data: unknown) => { env.cache.set(key, data); },
     removeFromCache: async (key: string) => { env.cache.delete(key); },
     getLocalSongs: async () => env.songs,
     saveLocalSongs: async () => {},
