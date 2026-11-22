@@ -1,8 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import {
+    applyTvLikedSongChange,
     isTvLikedSnapshotCurrent,
+    mergeTvLikedSongChanges,
     resolveTvLikedOwnerKey,
 } from '../../../src/tv/model/tvLikedSongs';
+import type { SongResult } from '../../../src/types';
+
+const song = (mediaId: string): SongResult => ({
+    id: mediaId,
+    name: mediaId,
+    artists: [],
+    album: { id: '', name: '' },
+    durationMs: 1,
+    sourceRef: { kind: 'online', providerId: 'netease', mediaId },
+});
 
 describe('TV liked-song ownership', () => {
     it('separates providers, accounts and liked collections', () => {
@@ -27,5 +39,28 @@ describe('TV liked-song ownership', () => {
         expect(isTvLikedSnapshotCurrent(accountA, accountA)).toBe(true);
         expect(isTvLikedSnapshotCurrent(accountA, accountB)).toBe(false);
         expect(isTvLikedSnapshotCurrent(null, null)).toBe(false);
+    });
+
+    it('adds a liked song once and removes it on unlike', () => {
+        const first = song('first');
+        const second = song('second');
+        const liked = applyTvLikedSongChange([first], { song: second, liked: true });
+
+        expect(liked).toEqual([second, first]);
+        expect(applyTvLikedSongChange(liked, { song: second, liked: true })).toBe(liked);
+        expect(applyTvLikedSongChange(liked, { song: second, liked: false })).toEqual([first]);
+        expect(applyTvLikedSongChange([first], { song: second, liked: false })).toEqual([first]);
+    });
+
+    it('applies changes made while the liked list was loading in order', () => {
+        const first = song('first');
+        const second = song('second');
+        const changes = [
+            { song: first, liked: true },
+            { song: second, liked: true },
+            { song: first, liked: false },
+        ];
+
+        expect(mergeTvLikedSongChanges([], changes)).toEqual([second]);
     });
 });

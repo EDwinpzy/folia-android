@@ -54,6 +54,7 @@ vi.mock('@/services/db', () => ({
     saveLocalSong: vi.fn(),
     saveLocalSongs: vi.fn(),
     saveToCache: vi.fn(),
+    saveToCacheOrThrow: vi.fn(),
 }));
 vi.mock('@/services/coverCache', () => ({
     removeCachedCover: vi.fn(),

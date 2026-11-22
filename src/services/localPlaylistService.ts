@@ -1,5 +1,5 @@
 import { LocalPlaylist, LocalSong } from '../types';
-import { getFromCache, getLocalSongs, saveToCache } from './db';
+import { getFromCache, getLocalSongs, saveToCacheOrThrow } from './db';
 
 const LOCAL_PLAYLISTS_CACHE_KEY = 'local_playlists';
 const FAVORITE_PLAYLIST_NAME = 'Liked Songs';
@@ -243,20 +243,32 @@ const playlistNeedsNormalization = (playlist: LegacyLocalPlaylist): boolean => {
 };
 
 const persistPlaylists = async (playlists: LocalPlaylist[]) => {
-    await saveToCache(LOCAL_PLAYLISTS_CACHE_KEY, playlists.map(normalizePlaylist));
+    await saveToCacheOrThrow(LOCAL_PLAYLISTS_CACHE_KEY, playlists.map(normalizePlaylist));
 };
 
-export const getLocalPlaylists = async (): Promise<LocalPlaylist[]> => {
+// Every playlist write reads the whole list and writes it back: one after another, so a write
+// that began from an older read cannot land after (and undo) a newer one.
+let playlistWrites: Promise<unknown> = Promise.resolve();
+const serializePlaylistWrite = <T>(write: () => Promise<T>): Promise<T> => {
+    const result = playlistWrites.then(write, write);
+    playlistWrites = result.catch(() => undefined);
+    return result;
+};
+
+const readLocalPlaylists = async (): Promise<{
+    playlists: LocalPlaylist[];
+    needsPersist: boolean;
+}> => {
     const cached = await getFromCache<LegacyLocalPlaylist[]>(LOCAL_PLAYLISTS_CACHE_KEY);
     const cachedPlaylists = Array.isArray(cached) ? cached : [];
     const localSongs = await getLocalSongs();
     const validSongById = new Map(localSongs.map(song => [song.id, song]));
     const duplicateCanonicalSongIds = buildDuplicateImportCanonicalSongIds(localSongs);
-    let shouldPersist = cachedPlaylists.some(playlistNeedsNormalization);
+    let needsPersist = cachedPlaylists.some(playlistNeedsNormalization);
     const playlists = cachedPlaylists.map(normalizePlaylist).map(playlist => {
         const repaired = repairPlaylistSongIds(playlist.songIds, validSongById, duplicateCanonicalSongIds);
         if (repaired.changed) {
-            shouldPersist = true;
+            needsPersist = true;
             return {
                 ...playlist,
                 songIds: repaired.songIds,
@@ -266,9 +278,19 @@ export const getLocalPlaylists = async (): Promise<LocalPlaylist[]> => {
         return playlist;
     });
 
-    const favoritePlaylist = playlists.find(playlist => playlist.isFavorite);
-    if (!favoritePlaylist) {
-        const nextPlaylists: LocalPlaylist[] = [
+    return { playlists, needsPersist };
+};
+
+const ensureFavoritePlaylist = (playlists: LocalPlaylist[]): {
+    playlists: LocalPlaylist[];
+    needsPersist: boolean;
+} => {
+    if (playlists.some(playlist => playlist.isFavorite)) {
+        return { playlists, needsPersist: false };
+    }
+
+    return {
+        playlists: [
             {
                 id: createPlaylistId(),
                 name: FAVORITE_PLAYLIST_NAME,
@@ -278,44 +300,58 @@ export const getLocalPlaylists = async (): Promise<LocalPlaylist[]> => {
                 isFavorite: true,
             },
             ...playlists,
-        ];
-        await persistPlaylists(nextPlaylists);
-        return nextPlaylists;
-    }
-
-    if (shouldPersist) {
-        await persistPlaylists(playlists);
-    }
-
-    return playlists;
+        ],
+        needsPersist: true,
+    };
 };
 
-export const saveLocalPlaylists = async (playlists: LocalPlaylist[]): Promise<LocalPlaylist[]> => {
-    const normalized = playlists.map(normalizePlaylist);
-    await persistPlaylists(normalized);
-    return normalized;
+const loadLocalPlaylistsForWrite = async (): Promise<{
+    playlists: LocalPlaylist[];
+    needsPersist: boolean;
+}> => {
+    const snapshot = await readLocalPlaylists();
+    const ensured = ensureFavoritePlaylist(snapshot.playlists);
+    return {
+        playlists: ensured.playlists,
+        needsPersist: snapshot.needsPersist || ensured.needsPersist,
+    };
+};
+
+export const getLocalPlaylists = async (): Promise<LocalPlaylist[]> => {
+    const snapshot = await loadLocalPlaylistsForWrite();
+    if (!snapshot.needsPersist) return snapshot.playlists;
+
+    return serializePlaylistWrite(async () => {
+        const latest = await loadLocalPlaylistsForWrite();
+        if (latest.needsPersist) {
+            await persistPlaylists(latest.playlists);
+        }
+        return latest.playlists;
+    });
 };
 
 export const createLocalPlaylist = async (name: string, songs: LocalSong[] = []): Promise<LocalPlaylist> => {
-    const playlists = await getLocalPlaylists();
-    const now = Date.now();
-    const playlist: LocalPlaylist = {
-        id: createPlaylistId(),
-        name: name.trim(),
-        songIds: dedupeSongIds(songs.map(song => song.id)),
-        createdAt: now,
-        updatedAt: now,
-    };
+    return serializePlaylistWrite(async () => {
+        const { playlists } = await loadLocalPlaylistsForWrite();
+        const now = Date.now();
+        const playlist: LocalPlaylist = {
+            id: createPlaylistId(),
+            name: name.trim(),
+            songIds: dedupeSongIds(songs.map(song => song.id)),
+            createdAt: now,
+            updatedAt: now,
+        };
 
-    await persistPlaylists([...playlists, playlist]);
-    return playlist;
+        await persistPlaylists([...playlists, playlist]);
+        return playlist;
+    });
 };
 
-export const updateLocalPlaylist = async (
+const updatePlaylist = async (
     playlistId: string,
-    updater: (playlist: LocalPlaylist) => LocalPlaylist
+    updater: (playlist: LocalPlaylist) => LocalPlaylist,
 ): Promise<LocalPlaylist | null> => {
-    const playlists = await getLocalPlaylists();
+    const { playlists } = await loadLocalPlaylistsForWrite();
     let updatedPlaylist: LocalPlaylist | null = null;
 
     const nextPlaylists = playlists.map(playlist => {
@@ -338,15 +374,20 @@ export const updateLocalPlaylist = async (
     return updatedPlaylist;
 };
 
-export const deleteLocalPlaylist = async (playlistId: string): Promise<void> => {
-    const playlists = await getLocalPlaylists();
+export const updateLocalPlaylist = async (
+    playlistId: string,
+    updater: (playlist: LocalPlaylist) => LocalPlaylist
+): Promise<LocalPlaylist | null> => serializePlaylistWrite(() => updatePlaylist(playlistId, updater));
+
+export const deleteLocalPlaylist = async (playlistId: string): Promise<void> => serializePlaylistWrite(async () => {
+    const { playlists } = await loadLocalPlaylistsForWrite();
     const target = playlists.find(playlist => playlist.id === playlistId);
     if (!target || target.isFavorite) {
         return;
     }
 
     await persistPlaylists(playlists.filter(playlist => playlist.id !== playlistId));
-};
+});
 
 export const canDeleteLocalPlaylist = (playlist: LocalPlaylist | null | undefined): boolean => {
     return Boolean(playlist && !playlist.isFavorite);
@@ -369,6 +410,34 @@ export const removeSongsFromLocalPlaylist = async (playlistId: string, songIds: 
         ...playlist,
         songIds: playlist.songIds.filter(songId => !removingIds.has(songId)),
     }));
+};
+
+export const removeSongsFromAllLocalPlaylists = async (songIds: string[]): Promise<void> => {
+    if (songIds.length === 0) {
+        return;
+    }
+
+    const removingIds = new Set(songIds);
+    await serializePlaylistWrite(async () => {
+        const snapshot = await loadLocalPlaylistsForWrite();
+        let changed = snapshot.needsPersist;
+        const nextPlaylists = snapshot.playlists.map(playlist => {
+            const nextSongIds = playlist.songIds.filter(songId => !removingIds.has(songId));
+            if (nextSongIds.length === playlist.songIds.length) {
+                return playlist;
+            }
+
+            changed = true;
+            return {
+                ...playlist,
+                songIds: nextSongIds,
+            };
+        });
+
+        if (changed) {
+            await persistPlaylists(nextPlaylists);
+        }
+    });
 };
 
 export const reorderLocalPlaylistSongs = async (
@@ -395,12 +464,22 @@ export const getFavoriteLocalPlaylist = async (): Promise<LocalPlaylist> => {
 };
 
 export const setLocalSongFavorite = async (song: LocalSong, shouldFavorite: boolean): Promise<LocalPlaylist | null> => {
-    const favoritePlaylist = await getFavoriteLocalPlaylist();
     const canonicalSongId = resolveCanonicalLocalSongId(song.id, await getLocalSongs());
+    return serializePlaylistWrite(async () => {
+        const { playlists } = await loadLocalPlaylistsForWrite();
+        const favoritePlaylist = playlists.find(playlist => playlist.isFavorite);
+        if (!favoritePlaylist) return null;
 
-    if (shouldFavorite) {
-        return addSongIdsToLocalPlaylist(favoritePlaylist.id, [canonicalSongId]);
-    }
-
-    return removeSongsFromLocalPlaylist(favoritePlaylist.id, [canonicalSongId]);
+        const updatedPlaylist = normalizePlaylist({
+            ...favoritePlaylist,
+            songIds: shouldFavorite
+                ? dedupeSongIds([...favoritePlaylist.songIds, canonicalSongId])
+                : favoritePlaylist.songIds.filter(songId => songId !== canonicalSongId),
+            updatedAt: Date.now(),
+        });
+        await persistPlaylists(playlists.map(playlist => (
+            playlist.id === favoritePlaylist.id ? updatedPlaylist : playlist
+        )));
+        return updatedPlaylist;
+    });
 };

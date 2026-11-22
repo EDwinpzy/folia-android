@@ -15,9 +15,13 @@ import {
     resolveTvCarRecentAccountId,
 } from '../model/tvCarRecentPlays';
 import {
+    applyTvLikedSongChange,
     isTvLikedSnapshotCurrent,
+    mergeTvLikedSongChanges,
     resolveTvLikedOwnerKey,
+    type TvLikedSongChange,
 } from '../model/tvLikedSongs';
+import { getOnlineProviderIdForSong, getPlaybackSongKey } from '../../utils/appPlaybackGuards';
 import type { TvAccountModel } from './useTvAccount';
 
 const TV_LOCAL_ROW_SIZE = 14;
@@ -32,6 +36,7 @@ export type TvLibraryModel = {
     isLoadingLiked: boolean;
     likedError: string | null;
     refreshLocalSongs: () => Promise<number>;
+    applyLikedSongChange: (song: SongResult, liked: boolean) => void;
 };
 
 const readLocalQueue = async (): Promise<SongResult[]> => {
@@ -49,6 +54,9 @@ export const useTvLibrary = (account: TvAccountModel): TvLibraryModel => {
     const [likedError, setLikedError] = useState<string | null>(null);
     const [recentPlaysRevision, setRecentPlaysRevision] = useState(0);
     const likedRequestRef = useRef(0);
+    const likedChangesRef = useRef(new Map<string, TvLikedSongChange>());
+    const likedChangesOwnerKeyRef = useRef<string | null>(null);
+    const likedReadInFlightRef = useRef(false);
     const userId = account.activeAccount?.user?.id ?? null;
     const providerId = account.activeProviderId;
     const likedCollection = useMemo(
@@ -101,7 +109,12 @@ export const useTvLibrary = (account: TvAccountModel): TvLibraryModel => {
 
     useEffect(() => {
         const requestId = ++likedRequestRef.current;
+        if (likedChangesOwnerKeyRef.current !== likedOwnerKey) {
+            likedChangesRef.current.clear();
+            likedChangesOwnerKeyRef.current = likedOwnerKey;
+        }
         if (!userId) {
+            likedReadInFlightRef.current = false;
             setLikedSongs([]);
             setLoadedLikedOwnerKey(null);
             setIsLoadingLiked(false);
@@ -111,6 +124,7 @@ export const useTvLibrary = (account: TvAccountModel): TvLibraryModel => {
 
         setIsLoadingLiked(true);
         setLikedError(null);
+        likedReadInFlightRef.current = true;
         void (async () => {
             if (likedCollection) {
                 const page = await omni.getCollectionTracks(likedCollection, {
@@ -125,13 +139,20 @@ export const useTvLibrary = (account: TvAccountModel): TvLibraryModel => {
         })()
             .then(songs => {
                 if (likedRequestRef.current !== requestId) return;
-                setLikedSongs(songs);
+                likedReadInFlightRef.current = false;
+                setLikedSongs(mergeTvLikedSongChanges(
+                    songs,
+                    likedChangesRef.current.values(),
+                ));
+                likedChangesRef.current.clear();
                 setLoadedLikedOwnerKey(likedOwnerKey);
             })
             .catch(error => {
                 if (likedRequestRef.current !== requestId) return;
+                likedReadInFlightRef.current = false;
                 console.warn('[TV Library] Liked songs unavailable', error);
                 setLikedSongs([]);
+                likedChangesRef.current.clear();
                 setLoadedLikedOwnerKey(likedOwnerKey);
                 setLikedError(error instanceof Error ? error.message : 'liked-songs-unavailable');
             })
@@ -171,6 +192,14 @@ export const useTvLibrary = (account: TvAccountModel): TvLibraryModel => {
     const isLoadingLiked = userId !== null
         && (isLoadingLikedState || !isTvLikedSnapshotCurrent(loadedLikedOwnerKey, likedOwnerKey));
 
+    const applyLikedSongChange = useCallback((song: SongResult, liked: boolean) => {
+        if (userId === null || getOnlineProviderIdForSong(song) !== providerId) return;
+        if (likedReadInFlightRef.current) {
+            likedChangesRef.current.set(getPlaybackSongKey(song), { song, liked });
+        }
+        setLikedSongs(current => applyTvLikedSongChange(current, { song, liked }));
+    }, [providerId, userId]);
+
     return {
         localSongs,
         recentLocalSongs,
@@ -181,5 +210,6 @@ export const useTvLibrary = (account: TvAccountModel): TvLibraryModel => {
         isLoadingLiked,
         likedError,
         refreshLocalSongs,
+        applyLikedSongChange,
     };
 };

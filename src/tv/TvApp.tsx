@@ -579,6 +579,7 @@ export const TvApp = ({ variant = 'tv' }: { variant?: 'tv' | 'car' } = {}) => {
                             onOpenQueue={() => setRoute(current => ({ ...current, overlay: 'queue' }))}
                             onOpenEffects={isCar ? undefined : openEffects}
                             onRevealControls={revealPlayerChromeFromTouch}
+                            onSongLikeChanged={library.applyLikedSongChange}
                             inert={route.overlay !== null && route.overlay !== 'controls'}
                         />
                     </Suspense>

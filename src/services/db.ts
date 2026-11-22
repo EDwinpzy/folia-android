@@ -84,6 +84,11 @@ export const saveToCache = async (key: string, data: unknown): Promise<void> => 
   }
 };
 
+// The same write, for callers that must tell the user when it did not reach the device.
+export const saveToCacheOrThrow = async (key: string, data: unknown): Promise<void> => {
+  await putCacheEntry(key, data);
+};
+
 export const getFromCache = async <T>(key: string): Promise<T | null> => {
   try {
     return await readCacheEntry<T>(key);

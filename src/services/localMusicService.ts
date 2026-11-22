@@ -1,6 +1,6 @@
 import { LocalSong, LyricData, LocalLibrarySnapshot, LocalLibrarySnapshotFile, LocalLibrarySnapshotNode, type SongResult } from '../types';
 import { saveLocalSong, saveLocalSongs, deleteLocalSong as dbDeleteLocalSong, deleteLocalSongs as dbDeleteLocalSongs, saveDirHandles, getDirHandles, deleteDirHandle, getLocalSongs, getLocalLibrarySnapshot, saveLocalLibrarySnapshot, deleteLocalLibrarySnapshot } from './db';
-import { getLocalPlaylists, saveLocalPlaylists } from './localPlaylistService';
+import { removeSongsFromAllLocalPlaylists } from './localPlaylistService';
 import { parseEmbeddedMetadataAsync, type EmbeddedMetadataResult } from '../utils/localMetadataWorkerClient';
 import { autoMatchBestLyric } from '../utils/lyrics/autoMatchBestLyric';
 import { normalizeLyricMatchText } from '../utils/lyrics/matchScore';
@@ -128,32 +128,6 @@ function formatImportDuration(ms: number): string {
 
 function notifyLocalMusicUpdated() {
     window.dispatchEvent(new CustomEvent(LOCAL_MUSIC_UPDATED_EVENT));
-}
-
-async function removeDeletedSongIdsFromPlaylists(songIds: string[]): Promise<void> {
-    if (songIds.length === 0) {
-        return;
-    }
-
-    const removingIds = new Set(songIds);
-    const playlists = await getLocalPlaylists();
-    let changed = false;
-    const nextPlaylists = playlists.map(playlist => {
-        const nextSongIds = playlist.songIds.filter(songId => !removingIds.has(songId));
-        if (nextSongIds.length === playlist.songIds.length) {
-            return playlist;
-        }
-
-        changed = true;
-        return {
-            ...playlist,
-            songIds: nextSongIds,
-        };
-    });
-
-    if (changed) {
-        await saveLocalPlaylists(nextPlaylists);
-    }
 }
 
 function notifyLocalMusicScanProgress(detail: LocalMusicScanProgressDetail) {
@@ -1971,7 +1945,7 @@ export async function deleteSongsByIds(songIds: string[]): Promise<void> {
             .map(song => song.nativeAudioRef)
             .filter((ref): ref is string => Boolean(ref)),
     ).catch(error => console.warn('[LocalMusic] Failed to delete imported android audio:', error));
-    await removeDeletedSongIdsFromPlaylists(uniqueSongIds);
+    await removeSongsFromAllLocalPlaylists(uniqueSongIds);
     await Promise.all(Array.from(affectedRoots).map(cleanupDirHandleIfUnused));
     notifyLocalMusicUpdated();
     noteLocalLibraryDiagnostic('delete:done', { songs: uniqueSongIds.length, ms: Date.now() - startedAt });
@@ -2101,7 +2075,7 @@ async function deleteFolderContents(folderName: string): Promise<void> {
         dbDeleteLocalSongs(songIdsToDelete),
         ...songIdsToDelete.map(id => removeCachedCover(`cover_local_${id}`)),
     ]);
-    await removeDeletedSongIdsFromPlaylists(songIdsToDelete);
+    await removeSongsFromAllLocalPlaylists(songIdsToDelete);
 
     notifyLocalMusicUpdated();
     console.log(`[LocalMusic] Deleted ${songsToDelete.length} songs from folder tree: ${folderName}`);

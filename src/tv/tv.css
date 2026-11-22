@@ -3270,6 +3270,19 @@ img {
     height: 18px;
 }
 
+.tv-control-buttons button.is-utility.is-liked {
+    color: #fb7185;
+}
+
+.tv-app .tv-control-buttons button.is-utility.is-liked[data-tv-focusable="true"]:focus {
+    background: #fb7185;
+    color: #09090e;
+}
+
+.tv-app.is-car .tv-control-buttons button.is-utility.is-liked {
+    color: #fb7185;
+}
+
 .tv-control-buttons button.is-primary {
     width: clamp(44px, 7.4vh, 50px);
     height: clamp(44px, 7.4vh, 50px);
@@ -4372,6 +4385,12 @@ img {
     border-color: rgba(167, 139, 250, 0.58);
     background: linear-gradient(145deg, #9f7df8, #7650df);
     color: #fff;
+}
+
+.tv-app.is-car.is-touch-input .tv-control-buttons button.is-utility.is-liked:focus {
+    border-color: rgba(255, 255, 255, 0.16);
+    background: rgba(251, 113, 133, 0.16);
+    color: #fb7185;
 }
 
 @media (max-width: 1100px) {
